@@ -42,3 +42,50 @@ export const USER_ASSIST = {
 };
 
 export const GAME_LENGTHS = [3, 5, 7];
+
+// 'lock' is the cinematic camera: bolted to the player, always facing the end zone.
+export const CAMERA_MODES = ['follow', 'broadcast', 'lock'];
+
+// Laying out for a ball that is coming down out of reach.
+export const DIVE = {
+  minGap: 1.25, // a jump covers anything closer than this
+  range: 3.5, // farthest a dive can cover, yards
+  height: 1.35, // a laid-out receiver meets the ball about this far off the turf
+  maxTime: 0.62, // only once the ball is this close to coming down
+  minAir: 0.34, // shortest and longest time spent laid out
+  maxAir: 0.62,
+  minSpeed: 5.0,
+  maxSpeed: 9.5,
+  reach: 1.15, // how far ahead of the body the hands get
+  radius: 0.6,
+  downTime: 0.85, // seconds on the turf afterwards
+  groundHold: 0.84, // chance a diving catch survives the ground, before hands
+};
+
+// Bodies meeting at the catch point.
+export const CONTACT = {
+  threat: 3.2, // a defender this close and still closing can hit the catch
+  closing: -1.0, // ...unless he is already falling away from the play, yd/s
+  window: 0.45, // seconds the receiver has to secure the ball
+  minHit: 1.8, // closing speed where a bump becomes a hit
+  knockdown: 4.2, // closing speed that puts the receiver on the turf
+  lateHit: 4.6, // after the whistle it takes more to knock a man over
+  downTime: 1.0,
+};
+
+// Balls that come off hands and stay alive.
+export const TIP = {
+  max: 2, // after this many tips the next miss is dead
+  base: 0.14, // receiver: chance a failed catch pops up instead of dying
+  quality: 0.4, // ...plus this much when it hit him square in the hands
+  swat: 0.24, // defender: chance a breakup goes up instead of down
+  keep: 0.25, // fraction of the ball's speed it keeps
+  scatter: 2.0,
+  pop: [2.6, 4.4], // upward speed off the hands, yd/s
+};
+
+export const FALL = {
+  friction: 11, // yd/s^2 sliding on the turf
+  getUp: 0.55, // seconds to get back to his feet
+};
+

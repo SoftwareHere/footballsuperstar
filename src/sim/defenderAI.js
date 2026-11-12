@@ -91,6 +91,20 @@ export class DefenderAI {
       }
     }
 
+    if (rep.phase === 'flight' && rep.securing) {
+      // The receiver has it but has not finished the catch: go through him.
+      me.speedCap = 1;
+      me.backpedal = false;
+      me.faceTarget = null;
+      const top = p.topSpeed;
+      const dx = wr.pos.x - me.pos.x;
+      const dz = wr.pos.z - me.pos.z;
+      const d = Math.hypot(dx, dz) || 1;
+      steer(out, me, (dx / d) * top, (dz / d) * top);
+      out.sprint = true;
+      return out;
+    }
+
     if (rep.phase === 'flight') {
       if (this.throwSeenAt === null) {
         this.throwSeenAt = rep.t + p.reaction * 0.7;

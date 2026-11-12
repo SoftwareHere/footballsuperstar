@@ -1,6 +1,6 @@
 import { FIELD, REP } from '../config.js';
 import { clamp, dist2 } from '../core/vec.js';
-import { blankIntent, steer, playTheBall } from './aiCommon.js';
+import { blankIntent, steer, playTheBall, runThrough } from './aiCommon.js';
 
 // Each move is a list of [outside, depth] waypoints in yards from the
 // receiver's alignment. `breakIdx` is the waypoint after which he is into his
@@ -94,7 +94,9 @@ export class ReceiverAI {
 
     if (rep.phase === 'flight') {
       me.faceTarget = null;
-      playTheBall(out, me, rep.ball, rep.ball.target, this.jumpLead);
+      // Ball in his hands: protect it and keep his feet moving.
+      if (me.hasBall) runThrough(out, me);
+      else playTheBall(out, me, rep.ball, rep.ball.target, this.jumpLead);
       return out;
     }
 

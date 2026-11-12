@@ -2,7 +2,7 @@ import { STAT_KEYS, STAT_MAX, STAT_MIN } from '../sim/ratings.js';
 import { clamp } from '../core/vec.js';
 import { RIVALS } from './opponents.js';
 import { newCareer, SAVE_VERSION, MAX_LEVEL } from './progression.js';
-import { GAME_LENGTHS } from '../config.js';
+import { GAME_LENGTHS, CAMERA_MODES } from '../config.js';
 
 export const SAVE_KEY = 'footballsuperstar.save.v1';
 
@@ -41,7 +41,7 @@ export function sanitize(raw) {
   }
   const s = raw.settings || {};
   if (GAME_LENGTHS.includes(s.target)) career.settings.target = s.target;
-  if (s.camera === 'follow' || s.camera === 'broadcast') career.settings.camera = s.camera;
+  if (CAMERA_MODES.includes(s.camera)) career.settings.camera = s.camera;
   career.settings.muted = Boolean(s.muted);
   career.settings.tier = int(s.tier, 1, career.unlocked, 1);
   return career;

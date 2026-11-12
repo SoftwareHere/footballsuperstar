@@ -1,4 +1,4 @@
-import { SIM_DT, REP } from './config.js';
+import { SIM_DT, REP, CAMERA_MODES } from './config.js';
 import { RNG } from './core/rng.js';
 import { Input } from './core/input.js';
 import { Match } from './sim/match.js';
@@ -54,6 +54,8 @@ const REASON_TEXT = {
   oob: 'Caught out of bounds',
 };
 
+const CAMERA_NAMES = { follow: 'FOLLOW CAM', broadcast: 'BROADCAST CAM', lock: 'CINEMATIC CAM' };
+
 const TENDENCY_TEXT = {
   in: 'your inside breaks',
   out: 'your outside breaks',
@@ -75,6 +77,7 @@ export class Game {
     this.match = null;
     this.rep = null;
     this.role = 'wr';
+    this.was = { wr: { x: 0, y: 0, z: 0, facing: 0 }, db: { x: 0, y: 0, z: 0, facing: 0 }, ball: { x: 0, y: 0, z: 0 }, qb: { z: 0 } };
     this.seed = Number(new URLSearchParams(window.location.search).get('seed')) || null;
 
     this.ui = new UI(uiRoot, {
@@ -129,10 +132,11 @@ export class Game {
       return true;
     }
     if (name === 'camera' && !this.paused) {
-      const next = this.career.settings.camera === 'follow' ? 'broadcast' : 'follow';
+      const modes = CAMERA_MODES;
+      const next = modes[(modes.indexOf(this.career.settings.camera) + 1) % modes.length];
       this.career.settings.camera = next;
       saveCareer(this.career);
-      this.ui.banner(next === 'follow' ? 'FOLLOW CAM' : 'BROADCAST CAM', '', 'small', 0.9);
+      this.ui.banner(CAMERA_NAMES[next], '', 'small', 0.9);
       return true;
     }
     return false;
@@ -202,7 +206,8 @@ export class Game {
     this.role = match.userRole;
     this.recorded = false;
     this.acc = 0;
-    this.view.rig.cut();
+    this.view.cut();
+    this.snapshot();
     this.input.clearPresses();
 
     const name = this.rival.name.split(' ')[1].toUpperCase();
@@ -266,8 +271,27 @@ export class Game {
     this.sfx.play('whistle');
   }
 
+  /** Remember where everything is, so the picture can be smoothed between sim steps. */
+  snapshot() {
+    const rep = this.rep;
+    const was = this.was;
+    for (const who of ['wr', 'db']) {
+      const a = rep[who];
+      const w = was[who];
+      w.x = a.pos.x;
+      w.y = a.y;
+      w.z = a.pos.z;
+      w.facing = a.facing;
+    }
+    was.ball.x = rep.ball.pos.x;
+    was.ball.y = rep.ball.pos.y;
+    was.ball.z = rep.ball.pos.z;
+    was.qb.z = rep.qb.pos.z;
+  }
+
   stepSim() {
     const rep = this.rep;
+    this.snapshot();
     rep.step(SIM_DT);
     for (const e of rep.events) this.handleEvent(e);
     rep.events.length = 0;
@@ -325,7 +349,7 @@ export class Game {
     this.input.reset();
     this.sfx.setCrowd(false);
     this.ui.showHud(false);
-    this.view.rig.cut();
+    this.view.cut();
     this.ui.showMenu(this.career);
   }
 
@@ -350,7 +374,8 @@ export class Game {
 
     const viewDt = this.paused ? 0 : real * Math.min(this.timeScale, 2);
     if (this.rep && this.state !== 'menu') {
-      this.view.syncRep(viewDt, this.rep, this.role, this.career.settings.camera);
+      const alpha = running ? Math.min(1, this.acc / SIM_DT) : 1;
+      this.view.syncRep(viewDt, this.rep, this.role, this.career.settings.camera, this.was, alpha);
       if (this.state === 'match') this.updateHud();
     } else {
       this.view.syncMenu(real);
