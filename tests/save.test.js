@@ -47,6 +47,14 @@ describe('save', () => {
     expect(c.settings.camera).toBe('follow');
   });
 
+  it('remembers the cinematic camera', () => {
+    const storage = fakeStorage();
+    const c = newCareer();
+    c.settings.camera = 'lock';
+    saveCareer(c, storage);
+    expect(loadCareer(storage).settings.camera).toBe('lock');
+  });
+
   it('reset clears the save', () => {
     const storage = fakeStorage();
     const c = newCareer();

@@ -15,9 +15,20 @@ const QB_COLORS = { jersey: 0xff7a1a, trim: 0x1b1b1f, helmet: 0xe9e9ee, pants: 0
 
 const mix = (a, b, t) => a + (b - a) * t;
 
+// Picture quality, best last: [pixel ratio cap, shadows, floodlight glare].
+// The game starts at the top and steps down if the machine cannot hold a
+// playable frame rate.
+const QUALITY = [
+  [0.5, false, false],
+  [0.75, false, false],
+  [1, true, true],
+  [2, true, true],
+];
+
 /** Everything Three.js: owns the renderer and mirrors the simulation each frame. */
 export class SceneView {
-  constructor(canvas) {
+  /** `quality`: 'high' or 'low' pins the picture quality; anything else adapts. */
+  constructor(canvas, quality = 'auto') {
     this.canvas = canvas;
     const renderer = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }));
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -54,6 +65,7 @@ export class SceneView {
     const stadium = createStadium();
     scene.add(stadium.group);
     this.drawScore = stadium.setScore;
+    this.flares = stadium.flares;
     this.scoreKey = '';
     this.fx = new Effects();
     scene.add(this.fx.group);
@@ -71,7 +83,44 @@ export class SceneView {
     this.tmp = new THREE.Vector3();
     this.ballPos = { x: 0, y: 0, z: 0 };
     this.throwClock = 0;
+    this.pinned = quality === 'high' || quality === 'low';
+    this.slow = { time: 0, frames: 0, strikes: 0, warm: 2 };
+    this.setQuality(quality === 'low' ? 0 : QUALITY.length - 1);
+  }
+
+  setQuality(level) {
+    this.quality = Math.max(0, Math.min(QUALITY.length - 1, level));
+    const [ratio, shadows, glare] = QUALITY[this.quality];
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, ratio));
+    this.sun.castShadow = shadows;
+    for (const flare of this.flares) flare.visible = glare;
     this.resize();
+  }
+
+  /**
+   * Watch the frame rate and trade picture quality for it when it stays low:
+   * first resolution, then shadows. It only ever steps down, so the picture
+   * does not flicker between settings.
+   */
+  tune(real) {
+    if (this.pinned || this.quality === 0 || real <= 0) return;
+    const w = this.slow;
+    if (w.warm > 0) {
+      w.warm -= real; // shaders are still compiling: not a fair sample
+      return;
+    }
+    w.time += real;
+    w.frames += 1;
+    if (w.time < 1.5) return;
+    const fps = w.frames / w.time;
+    w.time = 0;
+    w.frames = 0;
+    w.strikes = fps < 26 ? w.strikes + 1 : 0;
+    if (w.strikes >= 2) {
+      w.strikes = 0;
+      w.warm = 1;
+      this.setQuality(this.quality - 1);
+    }
   }
 
   setRival(rival) {

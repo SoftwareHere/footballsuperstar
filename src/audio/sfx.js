@@ -129,6 +129,28 @@ export class Sfx {
         this.tone({ freq: 150, to: 55, dur: 0.14, type: 'sine', gain: 0.5 });
         this.noise({ dur: 0.07, gain: 0.3, freq: 1400 });
         break;
+      case 'tip':
+        // Leather off fingertips.
+        this.noise({ dur: 0.06, gain: 0.3, freq: 2400, q: 2 });
+        this.tone({ freq: 520, to: 300, dur: 0.07, type: 'triangle', gain: 0.18 });
+        break;
+      case 'dive':
+        this.noise({ dur: 0.22, gain: 0.16, freq: 900, to: 2600, q: 1.2 });
+        break;
+      case 'bump':
+        this.tone({ freq: 95, to: 60, dur: 0.08, type: 'sine', gain: 0.22 });
+        this.noise({ dur: 0.05, gain: 0.1, freq: 700 });
+        break;
+      case 'hit':
+        // Pads cracking together.
+        this.tone({ freq: 130, to: 38, dur: 0.2, type: 'sine', gain: 0.6 });
+        this.noise({ dur: 0.09, gain: 0.5, freq: 1900, to: 500, q: 0.8 });
+        this.noise({ dur: 0.05, gain: 0.3, freq: 3600, q: 3 });
+        break;
+      case 'bodyfall':
+        this.tone({ freq: 80, to: 40, dur: 0.18, type: 'sine', gain: 0.4 });
+        this.noise({ dur: 0.16, gain: 0.16, freq: 420, to: 180, q: 0.7 });
+        break;
       case 'thud':
         this.tone({ freq: 110, to: 45, dur: 0.16, type: 'sine', gain: 0.45 });
         this.noise({ dur: 0.1, gain: 0.2, freq: 500 });

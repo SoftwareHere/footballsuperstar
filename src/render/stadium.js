@@ -103,9 +103,11 @@ function lightTower(glow) {
   const flare = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: glow, color: 0xfff1cf, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending, fog: false })
   );
+  // Kept small: a big see-through sprite is the most expensive thing on screen.
   flare.position.set(0, 35, 0.6);
-  flare.scale.set(26, 26, 1);
+  flare.scale.set(13, 13, 1);
   group.add(flare);
+  group.userData.flare = flare;
   return group;
 }
 
@@ -174,6 +176,7 @@ export function createStadium() {
   group.add(end);
 
   const glow = glowTexture();
+  const flares = [];
   for (const [x, z] of [
     [-sideX - 22, FIELD.endZ - 22],
     [sideX + 22, FIELD.endZ - 22],
@@ -184,10 +187,11 @@ export function createStadium() {
     tower.position.set(x, 0, z);
     tower.lookAt(0, 0, midZ);
     group.add(tower);
+    flares.push(tower.userData.flare);
   }
 
   const board = scoreboard();
   board.group.position.set(0, 27, FIELD.endZ - 15 - 26);
   group.add(board.group);
-  return { group, setScore: board.draw };
+  return { group, setScore: board.draw, flares };
 }

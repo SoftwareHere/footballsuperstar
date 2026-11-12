@@ -100,7 +100,7 @@ async function playRep(page, { call, shots = {} }) {
         else want.add(s.me.x > 0 ? 'KeyA' : 'KeyD'); // break across the middle
         if (call && s.t > 1.5 && !s.called && !pressedCall) {
           await setKeys(page, held, want);
-          await page.keyboard.press('KeyF');
+          await page.keyboard.press('Enter'); // call for the ball: right hand
           pressedCall = true;
         }
       } else {
@@ -242,7 +242,7 @@ function checkRules(reps, target) {
   checkRules(game1, 3);
   assert(game1.some((r) => r.role === 'wr') && game1.some((r) => r.role === 'db'), 'played both offense and defense');
   const offense1 = game1.filter((r) => r.role === 'wr');
-  assert(offense1.every((r) => r.entry.called && !r.entry.forced), 'pressing F made the QB throw (called, not forced)');
+  assert(offense1.every((r) => r.entry.called && !r.entry.forced), 'pressing Enter made the QB throw (called, not forced)');
   assert(offense1.every((r) => r.maxLiveT < 3.5), 'called throws came out well before the 4-second clock');
 
   await sleep(500);
@@ -296,6 +296,52 @@ function checkRules(reps, target) {
   await page.keyboard.press('Escape');
   await sleep(200);
   assert(await page.evaluate(() => !window.__fs.paused && window.__fs.ui.screen === null), 'Esc resumes');
+
+  console.log('Cinematic camera');
+  const camera = () => page.evaluate(() => window.__fs.career.settings.camera);
+  const seen = [await camera()];
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press('KeyC');
+    await sleep(120);
+    seen.push(await camera());
+  }
+  assert(seen.join(',') === 'follow,broadcast,lock,follow', `C cycles follow, broadcast, cinematic (${seen.join(' > ')})`);
+  await page.keyboard.press('KeyC');
+  await sleep(120);
+  await page.keyboard.press('KeyC');
+  await sleep(120);
+  assert((await camera()) === 'lock', 'cinematic camera selected');
+  await page.waitForFunction(() => document.getElementById('ui').classList.contains('cinematic'), null, { timeout: 5000 });
+  assert(true, 'cinematic camera darkens the edges of the picture');
+  await page.waitForFunction(() => window.__fs.rep.phase === 'presnap' && window.__fs.rep.tPre > 0.5, null, { timeout: 30000 });
+  await page.screenshot({ path: path.join(SHOTS, '13-cinematic-presnap.png') });
+  await page.keyboard.press('Space'); // snap, or "ready"
+  await page.keyboard.down('KeyW');
+  await page.keyboard.down('ShiftLeft');
+  await page.waitForFunction(() => window.__fs.rep.phase !== 'presnap', null, { timeout: 10000 });
+  // While he runs, the camera must stay bolted to him and pointed at the end zone.
+  const rig = [];
+  for (let i = 0; i < 6; i++) {
+    await sleep(110);
+    rig.push(
+      await page.evaluate(() => {
+        const v = window.__fs.view;
+        const cam = v.rig.camera;
+        const dir = cam.getWorldDirection(cam.position.clone());
+        return { dx: cam.position.x - v.focus.x, dz: cam.position.z - v.focus.z, dirX: dir.x, dirZ: dir.z, x: v.focus.x, z: v.focus.z, mode: v.rig.mode };
+      })
+    );
+    if (i === 2) await page.screenshot({ path: path.join(SHOTS, '14-cinematic-running.png') });
+  }
+  await page.keyboard.up('KeyW');
+  await page.keyboard.up('ShiftLeft');
+  const moved = Math.hypot(rig[5].x - rig[0].x, rig[5].z - rig[0].z);
+  const drift = Math.max(...rig.map((r) => Math.hypot(r.dx - rig[0].dx, r.dz - rig[0].dz)));
+  assert(rig.every((r) => r.mode === 'lock'), 'camera rig is in lock mode');
+  assert(moved > 1.5, `the player ran (${moved.toFixed(1)} yards)`);
+  assert(drift < 1e-6, `camera stayed locked to the player (drift ${drift.toExponential(1)} yards)`);
+  // No sideways component at all, and pointing downfield (-z); it tilts down more on defense.
+  assert(rig.every((r) => Math.abs(r.dirX) < 1e-6 && r.dirZ < -0.7), 'camera kept facing straight down the field at the end zone');
 
   assert(problems.length === 0, `no console or page errors${problems.length ? `: ${problems.join(' | ')}` : ''}`);
   await browser.close();

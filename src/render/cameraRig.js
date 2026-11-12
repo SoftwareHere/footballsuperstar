@@ -3,12 +3,13 @@ import * as THREE from 'three';
 const damp = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
 
 // The cinematic camera's fixed mount, per role: yards behind the player,
-// yards above the turf, how far it sits off his shoulder, and how far ahead
-// of him it looks. On defense the receiver starts behind you, so the mount
-// is farther back to keep him in the picture.
+// yards above the turf, how far it sits off his shoulder, and the point it
+// is aimed at (yards downfield of him, and how high). On defense the
+// receiver starts behind you, so the mount is higher and farther back and
+// aimed a little short of you, to keep him in the picture.
 const LOCK = {
-  wr: { back: 5.4, height: 2.75, side: 0.55, ahead: 9, fov: 50 },
-  db: { back: 11.5, height: 5.6, side: 0, ahead: 7, fov: 50 },
+  wr: { back: 5.4, height: 2.75, side: 0.55, ahead: 9, lookY: 1.25, fov: 50 },
+  db: { back: 14, height: 7.6, side: 0, ahead: -2, lookY: 1.25, fov: 56 },
 };
 
 /**
@@ -62,7 +63,7 @@ export class CameraRig {
       this.lockSide = this.snapNext || this.lockSide === undefined ? side : this.lockSide;
       this.offset.set(this.lockSide, m.height, m.back);
       this.pos.set(focus.x + this.offset.x, (focus.y || 0) * 0.7 + this.offset.y, focus.z + this.offset.z);
-      this.look.set(this.pos.x, this.pos.y - (m.height - 1.25), this.pos.z - m.back - m.ahead);
+      this.look.set(this.pos.x, this.pos.y - (m.height - m.lookY), this.pos.z - m.back - m.ahead);
       fov = m.fov + Math.min(8, (focus.speed || 0) * 0.8) + (flight ? 6 : 0);
       this.finish(dt, fov, 5);
       return;

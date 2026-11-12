@@ -46,6 +46,21 @@ body {
   display: none !important;
 }
 
+/* Cinematic camera: the edges of the picture fall away, like a long lens. */
+#ui::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background: radial-gradient(ellipse at 50% 48%, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, 0.5) 100%);
+}
+
+#ui.cinematic::before {
+  opacity: 1;
+}
+
 kbd {
   display: inline-block;
   min-width: 1.6em;

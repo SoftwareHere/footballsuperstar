@@ -1,4 +1,4 @@
-import { SIM_DT, REP, CAMERA_MODES } from './config.js';
+import { SIM_DT, REP, CAMERA_MODES, CONTACT } from './config.js';
 import { RNG } from './core/rng.js';
 import { Input } from './core/input.js';
 import { Match } from './sim/match.js';
@@ -52,6 +52,16 @@ const REASON_TEXT = {
   int: 'Picked off',
   ground: 'Nobody got there',
   oob: 'Caught out of bounds',
+  hit: 'Jarred loose by the hit',
+};
+
+// How the catch was made, when it was something worth shouting about.
+const CATCH_TITLES = {
+  dive: 'DIVING CATCH!',
+  oneHand: 'ONE-HANDED!',
+  overShoulder: 'OVER THE SHOULDER!',
+  juggle: 'JUGGLING CATCH!',
+  low: 'SHOESTRING CATCH!',
 };
 
 const CAMERA_NAMES = { follow: 'FOLLOW CAM', broadcast: 'BROADCAST CAM', lock: 'CINEMATIC CAM' };
@@ -66,19 +76,22 @@ const TENDENCY_TEXT = {
 export class Game {
   constructor({ canvas, uiRoot }) {
     this.career = loadCareer();
-    this.view = new SceneView(canvas);
+    const query = new URLSearchParams(window.location.search);
+    this.view = new SceneView(canvas, query.get('quality') || 'auto');
     this.input = new Input(window);
     this.sfx = new Sfx();
     this.sfx.setMuted(this.career.settings.muted);
     this.state = 'menu'; // 'menu' | 'match' | 'postgame'
     this.paused = false;
     this.timeScale = 1;
+    this.slowmo = 0; // seconds of slow motion left
+    this.cinematic = false;
     this.acc = 0;
     this.match = null;
     this.rep = null;
     this.role = 'wr';
     this.was = { wr: { x: 0, y: 0, z: 0, facing: 0 }, db: { x: 0, y: 0, z: 0, facing: 0 }, ball: { x: 0, y: 0, z: 0 }, qb: { z: 0 } };
-    this.seed = Number(new URLSearchParams(window.location.search).get('seed')) || null;
+    this.seed = Number(query.get('seed')) || null;
 
     this.ui = new UI(uiRoot, {
       career: () => this.career,
@@ -205,6 +218,8 @@ export class Game {
     this.rep = match.startRep();
     this.role = match.userRole;
     this.recorded = false;
+    this.heardCatch = false;
+    this.slowmo = 0;
     this.acc = 0;
     this.view.cut();
     this.snapshot();
@@ -251,6 +266,29 @@ export class Game {
       case 'jump':
         this.sfx.play('jump');
         break;
+      case 'dive':
+        this.sfx.play('dive');
+        break;
+      case 'catch':
+        // Ball in the hands. It is not a completion until he finishes the catch.
+        this.sfx.play('catch');
+        this.heardCatch = true;
+        break;
+      case 'tip':
+        this.sfx.play('tip');
+        ui.banner('TIPPED!', 'Still live. Go get it.', 'warn', 0.9);
+        break;
+      case 'contact':
+        if (e.power > 3) this.sfx.play('bump');
+        break;
+      case 'hit':
+        this.sfx.play('hit');
+        this.view.rig.shake(Math.min(0.3, 0.05 + e.power * 0.03));
+        if (e.power >= CONTACT.knockdown) this.slowmo = 0.3;
+        break;
+      case 'fall':
+        this.sfx.play('bodyfall');
+        break;
       default:
     }
   }
@@ -259,14 +297,27 @@ export class Game {
     const mine = entry.scorer === 'user';
     const offense = entry.userRole === 'wr';
     let title;
-    if (entry.complete) title = offense ? 'COMPLETE!' : 'CAUGHT';
-    else if (entry.reason === 'int') title = 'INTERCEPTED!';
+    if (entry.complete) {
+      if (!offense) title = 'CAUGHT';
+      else if (entry.throughContact) title = 'HELD ON THROUGH THE HIT!';
+      else if (entry.toeTap) title = 'TOE-TAP!';
+      else title = CATCH_TITLES[entry.catchType] || 'COMPLETE!';
+    } else if (entry.reason === 'int') title = entry.tips ? 'PICKED OFF THE TIP!' : 'INTERCEPTED!';
+    else if (entry.reason === 'hit') title = 'JARRED LOOSE!';
     else if (entry.reason === 'swat' || entry.reason === 'breakup') title = offense ? 'BROKEN UP' : 'PASS BROKEN UP!';
     else title = 'INCOMPLETE';
     const who = mine ? 'YOU' : this.rival.name.split(' ')[1].toUpperCase();
-    const detail = entry.complete ? `${Math.max(0, Math.round(entry.depth))} yards downfield` : REASON_TEXT[entry.reason];
+    let detail;
+    if (entry.complete) detail = `${Math.max(0, Math.round(entry.depth))} yards downfield`;
+    else if (entry.lostToGround) detail = 'Lost it going to the ground';
+    else if (entry.tips && entry.reason !== 'int') detail = 'Tipped, and nobody came down with it';
+    else detail = REASON_TEXT[entry.reason];
     this.ui.banner(title, `${detail} · +1 ${who}`, mine ? 'good' : 'bad', REP.resultLinger + 0.4);
-    this.sfx.play(entry.complete ? 'catch' : 'thud');
+    // The grab itself was already heard when the ball hit his hands.
+    if (!entry.complete) this.sfx.play('thud');
+    else if (!this.heardCatch) this.sfx.play('catch');
+    // A beat of slow motion for the spectacular ones.
+    if (entry.complete && (entry.catchType === 'dive' || entry.catchType === 'oneHand' || entry.throughContact)) this.slowmo = 0.35;
     this.sfx.play(mine ? 'cheer' : 'groan');
     this.sfx.play('whistle');
   }
@@ -356,14 +407,22 @@ export class Game {
   // ----------------------------------------------------------------- loop
 
   frame(now) {
-    const real = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
+    const elapsed = Math.max(0, (now - this.last) / 1000);
+    const real = Math.min(0.1, elapsed);
     this.last = now;
     const running = (this.state === 'match' && !this.paused) || this.state === 'postgame';
 
+    // A short slow-motion beat on big hits and spectacular catches.
+    let scale = this.timeScale;
+    if (this.slowmo > 0 && !this.paused) {
+      this.slowmo -= real;
+      scale *= 0.35;
+    }
+
     if (running && this.rep) {
-      this.acc += real * this.timeScale;
+      this.acc += real * scale;
       let steps = 0;
-      while (this.acc >= SIM_DT && steps < 60 * this.timeScale) {
+      while (this.acc >= SIM_DT && steps < Math.max(1, 60 * scale)) {
         this.stepSim();
         this.acc -= SIM_DT;
         steps += 1;
@@ -372,7 +431,7 @@ export class Game {
       if (this.acc > SIM_DT * 4) this.acc = 0;
     }
 
-    const viewDt = this.paused ? 0 : real * Math.min(this.timeScale, 2);
+    const viewDt = this.paused ? 0 : real * Math.min(scale, 2);
     if (this.rep && this.state !== 'menu') {
       const alpha = running ? Math.min(1, this.acc / SIM_DT) : 1;
       this.view.syncRep(viewDt, this.rep, this.role, this.career.settings.camera, this.was, alpha);
@@ -380,7 +439,14 @@ export class Game {
     } else {
       this.view.syncMenu(real);
     }
+    // The cinematic camera gets a darkened edge to the picture.
+    const cinematic = this.state === 'match' && this.career.settings.camera === 'lock';
+    if (cinematic !== this.cinematic) {
+      this.cinematic = cinematic;
+      this.ui.root.classList.toggle('cinematic', cinematic);
+    }
     this.ui.tick(real);
+    this.view.tune(Math.min(elapsed, 1)); // the true frame time, not the capped one
     this.view.render();
     requestAnimationFrame(this.frame);
   }
@@ -393,6 +459,7 @@ export class Game {
       const p = this.view.project(rep.ball.pos);
       if (!p.visible) arrow = p;
     }
+    this.view.setScore(this.match.score.user, this.match.score.rival, this.rival.name.split(' ')[1], this.match.target);
     this.ui.updateHud({
       score: this.match.score,
       target: this.match.target,

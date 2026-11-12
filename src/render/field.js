@@ -157,13 +157,11 @@ export function createField() {
 
   const turf = new THREE.Mesh(
     new THREE.PlaneGeometry(TEX.maxX - TEX.minX, TEX.maxZ - TEX.minZ),
-    new THREE.MeshStandardMaterial({
+    // Turf fills most of the screen, so it gets the cheap (matte) lighting model.
+    new THREE.MeshLambertMaterial({
       map: drawTurf(),
       normalMap: turfNormalMap(),
-      normalScale: new THREE.Vector2(0.55, 0.55),
-      roughness: 0.93,
-      metalness: 0,
-      envMapIntensity: 0.35,
+      normalScale: new THREE.Vector2(0.5, 0.5),
     })
   );
   turf.rotation.x = -Math.PI / 2;
