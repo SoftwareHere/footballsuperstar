@@ -1,4 +1,5 @@
-import './ui/styles.css';
+// styles.css is linked from index.html (not imported here) so the source also
+// runs without a bundler.
 import { Game } from './game.js';
 
 const canvas = document.getElementById('game');
