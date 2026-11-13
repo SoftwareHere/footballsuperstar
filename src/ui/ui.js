@@ -10,23 +10,23 @@ const key = (k) => `<kbd>${k}</kbd>`;
 
 const HINTS = {
   'wr:presnap': `${key('Space')} Snap the ball`,
-  'wr:live': `${key('WASD')} Run ${key('Shift')} Sprint ${key('Q')}${key('E')} Juke ${key('F')} Call for the ball`,
+  'wr:live': `${key('WASD')} Run ${key('Shift')} Sprint ${key('Q')}${key('E')} Juke ${key('Enter')} Call for the ball`,
   'wr:called': `${key('WASD')} Keep running: he leads you ${key('Shift')} Sprint`,
-  'wr:flight': `Get to the ring ${key('Space')} Jump and catch`,
+  'wr:flight': `Get to the ring ${key('Space')} Jump, or dive if it is out of reach`,
   'db:presnap': `${key('WASD')} Set your cushion ${key('Space')} Ready`,
   'db:live': `${key('WASD')} Stay with him ${key('Shift')} Sprint ${key('Q')}${key('E')} Break step`,
-  'db:flight': `Get to the ring ${key('Space')} Jump and swat`,
+  'db:flight': `Get to the ring ${key('Space')} Jump or dive to swat, or run through him`,
   done: `${key('Space')} Next rep`,
 };
 
 const CONTROLS = [
   ['Move', `${key('W')}${key('A')}${key('S')}${key('D')} or arrow keys`],
   ['Sprint (uses your sprint tank)', `hold ${key('Shift')}`],
-  ['Jump: catch on offense, swat on defense', key('Space')],
+  ['Play the ball: jump, or dive when it is out of reach', key('Space')],
   ['Juke / quick break step left, right', `${key('Q')} ${key('E')}`],
-  ['Call for the ball (offense)', key('F')],
-  ['Snap / ready / next rep', `${key('Space')} or ${key('Enter')}`],
-  ['Camera: follow or broadcast', key('C')],
+  ['Call for the ball (offense), with your right hand', key('Enter')],
+  ['Snap / ready / next rep', key('Space')],
+  ['Camera: follow, broadcast or cinematic', key('C')],
   ['Pause, mute', `${key('Esc')} ${key('M')}`],
 ];
 
@@ -309,9 +309,10 @@ export class UI {
           <ul class="rules">
             <li><b>Both ways.</b> You and your rival trade off. With the ball you are the receiver; without it you are the corner.</li>
             <li><b>Scoring.</b> A completion is a point for the receiver. An incompletion is a point for the defender. Possession flips after every point.</li>
-            <li><b>Offense is freestyle.</b> No plays. Run anything, then press ${key('F')} to call for the ball. The QB leads you from your speed and direction, so call it coming out of your break.</li>
+            <li><b>Offense is freestyle.</b> No plays. Run anything, then press ${key('Enter')} to call for the ball. The QB leads you from your speed and direction, so call it coming out of your break.</li>
             <li><b>${QB.deadline}-second pressure.</b> Nobody calls for it in ${QB.deadline} seconds? The QB throws anyway.</li>
-            <li><b>The ring.</b> A yellow ring shows where the ball comes down. A white ring closes on it as the ball arrives: be there and press ${key('Space')}.</li>
+            <li><b>The ring.</b> A yellow ring shows where the ball comes down. A white ring closes on it as the ball arrives: be there and press ${key('Space')}. Too far away to jump for it? ${key('Space')} lays you out in a dive instead.</li>
+            <li><b>It is physical.</b> A ball off the hands can pop up and stay live: the ring turns orange and anybody can come down with it. And a catch is not safe until it is finished. A defender who arrives with the ball can jar it loose, so on defense, run through the receiver.</li>
             <li><b>Level up.</b> Every game earns XP. Spend skill points on stats that work on both sides of the ball.</li>
           </ul>
           <table class="controls">${CONTROLS.map(([a, k]) => `<tr><td>${a}</td><td>${k}</td></tr>`).join('')}</table>

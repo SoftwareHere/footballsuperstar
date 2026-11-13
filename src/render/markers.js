@@ -30,14 +30,18 @@ export class Markers {
 
   update(dt, { user, rival, ball }) {
     this.time += dt;
-    this.userRing.position.set(user.pos.x, 0.03, user.pos.z);
-    this.rivalRing.position.set(rival.pos.x, 0.03, rival.pos.z);
+    this.userRing.position.set(user.x, 0.03, user.z);
+    this.rivalRing.position.set(rival.x, 0.03, rival.z);
     const pulse = 1 + Math.sin(this.time * 6) * 0.05;
     this.userRing.scale.set(pulse, pulse, 1);
 
     if (ball.state === 'flight' && ball.target) {
       const t = ball.target;
       this.target.visible = this.targetDot.visible = this.closing.visible = true;
+      // A tipped ball is anybody's: the ring turns orange.
+      const colour = ball.tips ? 0xff8a1f : 0xffe23d;
+      this.target.material.color.setHex(colour);
+      this.targetDot.material.color.setHex(colour);
       this.target.position.set(t.x, 0.035, t.z);
       this.targetDot.position.set(t.x, 0.036, t.z);
       this.closing.position.set(t.x, 0.037, t.z);

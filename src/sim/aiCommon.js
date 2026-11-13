@@ -1,5 +1,6 @@
-import { GRAVITY } from '../config.js';
+import { GRAVITY, DIVE } from '../config.js';
 import { len2 } from '../core/vec.js';
+import { planBallPlay } from './catching.js';
 
 /**
  * What kind of route is this, judged from the receiver's motion?
@@ -40,7 +41,8 @@ export function steer(out, me, vx, vz) {
 /**
  * Run to where the ball is coming down, arrive as it does, and go up for it.
  * `aim` is where this athlete believes the ball will arrive. He only goes up
- * for it if he will be within `jumpRange` yards of that spot.
+ * for it if he will be within `jumpRange` yards of that spot; if he cannot
+ * get there on his feet he lays out for it instead.
  */
 export function playTheBall(out, me, ball, aim, jumpLeadScale, jumpRange = 1.7) {
   const eta = Math.max(ball.eta, 0);
@@ -54,11 +56,29 @@ export function playTheBall(out, me, ball, aim, jumpLeadScale, jumpRange = 1.7) 
     steer(out, me, (dx / d) * speed, (dz / d) * speed);
     out.sprint = true;
   }
+  if (me.airborne || me.down) return;
+  // Out of reach on his feet: dive, timed so he is laid out when it arrives.
+  const plan = planBallPlay(me, ball, aim);
+  if (plan.dive) {
+    // Only for a ball he can actually get a hand on, not one sailing to someone else.
+    if (d <= DIVE.range && plan.t <= DIVE.minAir + 0.1 * jumpLeadScale) out.jump = true;
+    return;
+  }
   // Jump so the peak of the jump meets the ball.
   const tApex = Math.sqrt((2 * me.params.jumpHeight) / GRAVITY);
-  if (!me.airborne && eta <= tApex * jumpLeadScale) {
+  if (eta <= tApex * jumpLeadScale) {
     const px = me.pos.x + me.vel.x * eta;
     const pz = me.pos.z + me.vel.z * eta;
     if (Math.hypot(aim.x - px, aim.z - pz) <= jumpRange) out.jump = true;
   }
+}
+
+/** Keep going the way he is already going (ball in his hands, hit coming). */
+export function runThrough(out, me) {
+  const speed = len2(me.vel.x, me.vel.z);
+  if (speed < 0.5) return steer(out, me, 0, 0);
+  const top = me.params.topSpeed;
+  steer(out, me, (me.vel.x / speed) * top, (me.vel.z / speed) * top);
+  out.sprint = true;
+  return undefined;
 }

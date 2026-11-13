@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { FIELD } from '../config.js';
 
-const PX = 24; // texture pixels per yard
+const PX = 32; // texture pixels per yard
 const TEX = { minX: -32, maxX: 32, minZ: -50, maxZ: 20 };
 
 function drawTurf() {
@@ -36,10 +36,22 @@ function drawTurf() {
   g.fillText('SUPERSTAR', 0, 0.3 * PX);
   g.restore();
 
-  // turf speckle
-  for (let i = 0; i < 16000; i++) {
-    g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.05)';
-    g.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 2, 2);
+  // turf grain: short blades of lighter and darker green, laid along the mow
+  for (let i = 0; i < 90000; i++) {
+    const light = Math.random() < 0.5;
+    g.fillStyle = light ? `rgba(190,255,170,${0.03 + Math.random() * 0.05})` : `rgba(0,30,5,${0.04 + Math.random() * 0.07})`;
+    g.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 1 + Math.random() * 2, 3 + Math.random() * 6);
+  }
+  // broad, soft patches so the field is not one flat colour
+  for (let i = 0; i < 70; i++) {
+    const x = Math.random() * canvas.width;
+    const y = Math.random() * canvas.height;
+    const r = 60 + Math.random() * 220;
+    const patch = g.createRadialGradient(x, y, 0, x, y, r);
+    patch.addColorStop(0, Math.random() < 0.5 ? 'rgba(255,255,200,0.045)' : 'rgba(0,20,0,0.07)');
+    patch.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = patch;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
   }
 
   g.fillStyle = '#f4f7f2';
@@ -75,28 +87,35 @@ function drawTurf() {
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.anisotropy = 16;
   return tex;
 }
 
-function crowdTexture() {
+/** Fine bumps so the turf catches the light like grass instead of paint. */
+function turfNormalMap() {
+  const size = 256;
   const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 128;
+  canvas.width = canvas.height = size;
   const g = canvas.getContext('2d');
-  g.fillStyle = '#20242c';
-  g.fillRect(0, 0, 512, 128);
-  const shirts = ['#e8e8ea', '#1e6bff', '#f2c230', '#c8102e', '#3a3f4b', '#7fb2ff', '#f08a24'];
-  for (let row = 0; row < 16; row++) {
-    for (let col = 0; col < 96; col++) {
-      if (Math.random() < 0.12) continue;
-      g.fillStyle = shirts[(Math.random() * shirts.length) | 0];
-      g.fillRect(col * 5.33 + (row % 2) * 2.6, row * 8 + 1, 3.6, 5);
+  const img = g.createImageData(size, size);
+  const h = new Float32Array(size * size);
+  for (let i = 0; i < h.length; i++) h[i] = Math.random();
+  const at = (x, y) => h[((y + size) % size) * size + ((x + size) % size)];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = at(x + 1, y) - at(x - 1, y);
+      const dy = at(x, y + 1) - at(x, y - 1);
+      const k = (y * size + x) * 4;
+      img.data[k] = 128 + dx * 90;
+      img.data[k + 1] = 128 + dy * 90;
+      img.data[k + 2] = 255;
+      img.data[k + 3] = 255;
     }
   }
+  g.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(70, 76);
   return tex;
 }
 
@@ -112,7 +131,9 @@ function goalpost() {
   const bar = tube(0.1, 6.17);
   bar.rotation.z = Math.PI / 2;
   bar.position.set(0, 3.33, 0);
-  group.add(base, neck, bar);
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 2, 12), new THREE.MeshStandardMaterial({ color: 0x1b3f8f, roughness: 0.8 }));
+  pad.position.set(0, 1, 1.2);
+  group.add(base, neck, bar, pad);
   for (const x of [-3.085, 3.085]) {
     const up = tube(0.08, 9.5);
     up.position.set(x, 3.33 + 4.75, 0);
@@ -122,32 +143,26 @@ function goalpost() {
   return group;
 }
 
-function stand(width, depth, tex, repeat) {
-  const t = tex.clone();
-  t.needsUpdate = true;
-  t.repeat.set(repeat, 1.6);
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(width, depth),
-    new THREE.MeshLambertMaterial({ map: t })
-  );
-  return mesh;
-}
-
-/** The practice field, end zone, goalpost and a simple stadium around it. */
+/** The field itself: turf, paint, goalpost and pylons. The stadium is separate. */
 export function createField() {
   const group = new THREE.Group();
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(400, 400),
-    new THREE.MeshLambertMaterial({ color: 0x18502a })
+    new THREE.PlaneGeometry(600, 600),
+    new THREE.MeshLambertMaterial({ color: 0x1a4a27 })
   );
   ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.02;
+  ground.position.y = -0.03;
   group.add(ground);
 
   const turf = new THREE.Mesh(
     new THREE.PlaneGeometry(TEX.maxX - TEX.minX, TEX.maxZ - TEX.minZ),
-    new THREE.MeshLambertMaterial({ map: drawTurf() })
+    // Turf fills most of the screen, so it gets the cheap (matte) lighting model.
+    new THREE.MeshLambertMaterial({
+      map: drawTurf(),
+      normalMap: turfNormalMap(),
+      normalScale: new THREE.Vector2(0.5, 0.5),
+    })
   );
   turf.rotation.x = -Math.PI / 2;
   turf.position.set((TEX.minX + TEX.maxX) / 2, 0, (TEX.minZ + TEX.maxZ) / 2);
@@ -159,37 +174,26 @@ export function createField() {
   group.add(post);
 
   // pylons at the goal line and end line
-  const pylonMat = new THREE.MeshLambertMaterial({ color: 0xff6a13 });
+  const pylonMat = new THREE.MeshStandardMaterial({ color: 0xff6a13, roughness: 0.6 });
   for (const z of [FIELD.goalZ, FIELD.endZ]) {
     for (const x of [-FIELD.halfWidth, FIELD.halfWidth]) {
       const pylon = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.14), pylonMat);
       pylon.position.set(x, 0.25, z);
+      pylon.castShadow = true;
       group.add(pylon);
     }
   }
 
-  // stands: two sidelines and behind the end zone
-  const crowd = crowdTexture();
-  const wallMat = new THREE.MeshLambertMaterial({ color: 0x14306b });
-  const lean = 0.95; // how far the seating leans back from vertical
+  // Team benches along each sideline.
+  const benchMat = new THREE.MeshStandardMaterial({ color: 0xc9ced6, roughness: 0.5, metalness: 0.4 });
   for (const side of [-1, 1]) {
-    const s = stand(96, 26, crowd, 6);
-    s.rotation.order = 'YXZ';
-    s.rotation.y = (-side * Math.PI) / 2; // face the field
-    s.rotation.x = -lean;
-    s.position.set(side * 48.6, 9.7, -14);
-    group.add(s);
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 2.2, 96), wallMat);
-    wall.position.set(side * 37.5, 1.1, -14);
-    group.add(wall);
+    for (const z of [-6, -20]) {
+      const bench = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 9), benchMat);
+      bench.position.set(side * (FIELD.halfWidth + 4.2), 0.25, z);
+      bench.castShadow = true;
+      group.add(bench);
+    }
   }
-  const back = stand(76, 26, crowd, 5);
-  back.rotation.x = -lean;
-  back.position.set(0, 9.7, -71.6);
-  group.add(back);
-  const backWall = new THREE.Mesh(new THREE.BoxGeometry(76, 2.2, 1), wallMat);
-  backWall.position.set(0, 1.1, -60.5);
-  group.add(backWall);
 
   // line of scrimmage, TV-style
   const los = new THREE.Mesh(
@@ -201,21 +205,4 @@ export function createField() {
   group.add(los);
 
   return group;
-}
-
-export function skyTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 8;
-  canvas.height = 256;
-  const g = canvas.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#2466c4');
-  grad.addColorStop(0.35, '#5a9be0');
-  grad.addColorStop(0.6, '#b5d8f4');
-  grad.addColorStop(1, '#e4f1fb');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 8, 256);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
 }

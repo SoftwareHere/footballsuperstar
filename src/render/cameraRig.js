@@ -1,9 +1,26 @@
 import * as THREE from 'three';
 
+const damp = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
+
+// The cinematic camera's fixed mount, per role: yards behind the player,
+// yards above the turf, how far it sits off his shoulder, and the point it
+// is aimed at (yards downfield of him, and how high). On defense the
+// receiver starts behind you, so the mount is higher and farther back and
+// aimed a little short of you, to keep him in the picture.
+const LOCK = {
+  wr: { back: 5.4, height: 2.75, side: 0.55, ahead: 9, lookY: 1.25, fov: 50 },
+  db: { back: 14, height: 7.6, side: 0, ahead: -2, lookY: 1.25, fov: 56 },
+};
+
 /**
  * The camera always looks downfield, so up-screen is downfield and the
- * controls never rotate. "follow" sits behind your athlete; "broadcast" is a
- * high wide angle of the whole rep.
+ * controls never rotate.
+ *
+ *   follow     sits behind your athlete and eases after him
+ *   broadcast  a high wide angle of the whole rep
+ *   lock       cinematic: bolted to your athlete. It moves exactly as he
+ *              moves, with no lag and no swivel, and never turns away from
+ *              the end zone.
  */
 export class CameraRig {
   constructor(aspect) {
@@ -15,6 +32,10 @@ export class CameraRig {
     this.mode = 'follow';
     this.orbit = 0;
     this.snapNext = true;
+    this.fov = 52;
+    this.shakeAmount = 0;
+    this.shakeTime = 0;
+    this.offset = new THREE.Vector3(); // camera minus player, for the lock camera (and its tests)
   }
 
   /** Jump straight to the next target instead of easing (new rep, mode change). */
@@ -22,12 +43,31 @@ export class CameraRig {
     this.snapNext = true;
   }
 
-  update(dt, { focus, other = null, ball, mode }) {
+  /** Rattle the camera: a hit, or a body landing. `amount` is roughly yards. */
+  shake(amount) {
+    this.shakeAmount = Math.min(0.5, Math.max(this.shakeAmount, amount));
+  }
+
+  update(dt, { focus, other = null, ball, mode, role = 'wr' }) {
     if (mode !== this.mode) {
       this.mode = mode;
       this.cut();
     }
     const flight = ball && ball.state === 'flight' && ball.target;
+    let fov = 52;
+    if (mode === 'lock') {
+      const m = LOCK[role] || LOCK.wr;
+      // Bolted on: no easing. The only things that change are the lens
+      // (wider at speed and while the ball is up) and a little shake.
+      const side = focus.x >= 0 ? -m.side : m.side; // over the shoulder nearer the middle of the field
+      this.lockSide = this.snapNext || this.lockSide === undefined ? side : this.lockSide;
+      this.offset.set(this.lockSide, m.height, m.back);
+      this.pos.set(focus.x + this.offset.x, (focus.y || 0) * 0.7 + this.offset.y, focus.z + this.offset.z);
+      this.look.set(this.pos.x, this.pos.y - (m.height - m.lookY), this.pos.z - m.back - m.ahead);
+      fov = m.fov + Math.min(8, (focus.speed || 0) * 0.8) + (flight ? 6 : 0);
+      this.finish(dt, fov, 5);
+      return;
+    }
     if (mode === 'broadcast') {
       this.wantPos.set(focus.x * 0.3, 25, focus.z * 0.55 + 25);
       this.wantLook.set(focus.x * 0.55, 0, focus.z * 0.6 - 8);
@@ -56,6 +96,7 @@ export class CameraRig {
       this.wantLook.set(lookX, 1.3, lookZ);
     }
     this.ease(dt, 5.5);
+    this.finish(dt, fov, 6);
   }
 
   /** Slow orbit used behind the menus. */
@@ -68,14 +109,40 @@ export class CameraRig {
     this.wantPos.set(Math.sin(this.orbit) * 6.5 - rx, 2.4, Math.cos(this.orbit) * 6.5 - rz);
     this.wantLook.set(-rx, 1.2, -rz);
     this.ease(dt, 3);
+    this.shakeAmount = 0;
+    this.finish(dt, 46, 4);
   }
 
   ease(dt, rate) {
     const k = this.snapNext ? 1 : 1 - Math.exp(-rate * dt);
-    this.snapNext = false;
     this.pos.lerp(this.wantPos, k);
     this.look.lerp(this.wantLook, k);
-    this.camera.position.copy(this.pos);
-    this.camera.lookAt(this.look);
+  }
+
+  /** Place the real camera: position, aim, lens and shake. */
+  finish(dt, fov, fovRate) {
+    this.fov = this.snapNext ? fov : damp(this.fov, fov, fovRate, dt);
+    this.snapNext = false;
+    const cam = this.camera;
+    if (Math.abs(cam.fov - this.fov) > 0.01) {
+      cam.fov = this.fov;
+      cam.updateProjectionMatrix();
+    }
+    cam.position.copy(this.pos);
+    let lx = this.look.x;
+    let ly = this.look.y;
+    if (this.shakeAmount > 0.002) {
+      this.shakeTime += dt;
+      const a = this.shakeAmount;
+      const t = this.shakeTime;
+      cam.position.x += Math.sin(t * 61) * a * 0.5;
+      cam.position.y += Math.sin(t * 79 + 1.3) * a;
+      lx += Math.sin(t * 47 + 0.7) * a * 0.6;
+      ly += Math.sin(t * 53 + 2.1) * a * 0.6;
+      this.shakeAmount *= Math.exp(-9 * dt);
+    } else {
+      this.shakeAmount = 0;
+    }
+    cam.lookAt(lx, ly, this.look.z);
   }
 }

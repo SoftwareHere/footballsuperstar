@@ -29,21 +29,36 @@ export class BallModel {
     this.look = new THREE.Vector3();
   }
 
-  update(dt, ball) {
-    this.group.position.set(ball.pos.x, ball.pos.y, ball.pos.z);
+  /**
+   * `pos` is where to draw a ball that is in the air (smoothed between sim
+   * steps); `holder` is the model whose hands it is in, if anybody's.
+   */
+  update(dt, ball, pos = ball.pos, holder = null) {
     const moving = ball.state === 'flight' || ball.state === 'loose';
+    if (holder) {
+      this.group.position.copy(holder.socket);
+      this.look.copy(holder.socket).add(holder.socketDir);
+      this.group.lookAt(this.look);
+    } else {
+      this.group.position.set(pos.x, pos.y, pos.z);
+    }
     if (moving) {
       const v = ball.vel;
       if (Math.hypot(v.x, v.y, v.z) > 0.5) {
-        this.look.set(ball.pos.x + v.x, ball.pos.y + v.y, ball.pos.z + v.z);
+        this.look.set(pos.x + v.x, pos.y + v.y, pos.z + v.z);
         this.group.lookAt(this.look);
       }
-      this.spinner.rotation.z += dt * (ball.state === 'flight' ? 28 : 9);
+      // A thrown ball is a tight spiral; a tipped one tumbles.
+      const spiral = ball.state === 'flight' && !ball.tips;
+      this.spinner.rotation.z += dt * (spiral ? 28 : 9);
+      this.spinner.rotation.x = spiral ? 0 : this.spinner.rotation.x + dt * 11;
+    } else {
+      this.spinner.rotation.x = 0;
     }
     this.shadow.visible = moving;
-    this.shadow.position.set(ball.pos.x, 0.02, ball.pos.z);
-    const k = 1 + ball.pos.y * 0.12;
+    this.shadow.position.set(pos.x, 0.02, pos.z);
+    const k = 1 + pos.y * 0.12;
     this.shadow.scale.set(k, k, k);
-    this.shadow.material.opacity = Math.max(0.08, 0.38 - ball.pos.y * 0.025);
+    this.shadow.material.opacity = Math.max(0.08, 0.38 - pos.y * 0.025);
   }
 }
