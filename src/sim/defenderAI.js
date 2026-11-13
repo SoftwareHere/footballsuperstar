@@ -1,3 +1,4 @@
+import { HANDS } from '../config.js';
 import { clamp } from '../core/vec.js';
 import { norm } from './ratings.js';
 import { blankIntent, steer, playTheBall, classifyBreak } from './aiCommon.js';
@@ -6,7 +7,8 @@ import { blankIntent, steer, playTheBall, classifyBreak } from './aiCommon.js';
  * The rival playing cornerback. He sees the receiver slightly in the past
  * (his reaction time), keeps a cushion on top of vertical routes, drives on
  * anything underneath, can be frozen by a juke, and breaks on the ball once
- * he reads the throw.
+ * he reads the throw. Lined up in press he sits on the line and gets his
+ * hands on the receiver before he opens up to run with him.
  *
  * `expect` ('in' | 'out' | 'deep' | 'short') is what the receiver has been
  * running lately. A defender who expects a break cheats his alignment toward
@@ -34,6 +36,8 @@ export class DefenderAI {
     else if (this.expect === 'out') this.shade = -inside * (0.2 + this.confidence); // outside leverage
     else if (this.expect === 'deep') this.cushion0 += 3 * this.confidence;
     else if (this.expect === 'short') this.cushion0 = this.rng.range(1.3, 1.8);
+    // Close enough to get his hands on him: he will jam before he bails.
+    this.pressUntil = this.cushion0 <= 2.2 ? this.rng.range(0.45, 0.8) : 0;
     me.pos.x = wr.pos.x + this.shade;
     me.pos.z = wr.pos.z - this.cushion0;
     me.facing = 0;
@@ -163,6 +167,9 @@ export class DefenderAI {
     let cushion;
     if (vertical > 3) cushion = Math.max(onTop, Math.min(cushionNow, this.cushion0));
     else cushion = 0.78; // nothing deep to respect: drive on him
+    // Pressing: hold the line at arm's length until the hands have landed.
+    const pressing = rep.t < this.pressUntil && this.mode === 'backpedal' && cushionNow > 0.3;
+    if (pressing) cushion = Math.min(cushion, HANDS.full);
 
     const tx = px + this.shade;
     const tz = pz - cushion;

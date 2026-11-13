@@ -1,4 +1,4 @@
-import { QB, WR_START_X, BODY_RADIUS, USER_ASSIST, CONTACT, TIP } from '../config.js';
+import { QB, WR_START_X, BODY_RADIUS, USER_ASSIST, CONTACT, TIP, JUMP, BALANCE, HANDS } from '../config.js';
 import { clamp, dist2 } from '../core/vec.js';
 import { Athlete, NO_INTENT } from './athlete.js';
 import { Ball } from './ball.js';
@@ -28,6 +28,12 @@ import { classifyBreak } from './aiCommon.js';
  * The catch is physical. A ball that comes off hands can pop up and stay
  * alive; a receiver who gets it still has to hold on through a hit, or
  * through the ground if he dove for it, before the rep is his.
+ *
+ * So is everything before it. Within arm's reach the two men fight with
+ * their hands: the defender jams, the receiver pushes off and slides past,
+ * and the stronger man gets the better of it. Contact takes balance away
+ * rather than knocking anybody straight over: a man stumbles, catches
+ * himself if he can, and goes down only when his balance is gone.
  */
 export class Rep {
   constructor({ wr, db, rng, side = 1 }) {
@@ -63,6 +69,9 @@ export class Rep {
     this.tipReason = null; // what the incompletion is if a tipped ball falls
     this.tipInfo = null;
     this.touching = false;
+    // The hand fight: how long the jam has held, time until a shed defender can
+    // get his hands back on, and which shoulder the receiver is going past.
+    this.fight = { on: false, time: 0, rest: 0, side: 0 };
     this.carry = null; // momentum carried through the whistle
     this.wrCtl.setup?.(this, 'wr');
     this.dbCtl.setup?.(this, 'db');
@@ -135,18 +144,156 @@ export class Rep {
     // With the ball in the air, leaving your feet means playing it: a jump,
     // or a dive if that is the only way to get there.
     const live = this.phase === 'flight' && this.ball.state === 'flight';
+    this.watchBall(live);
+    this.handFight(dt);
     this.wr.step(wrI, dt, live && wrI.jump ? planBallPlay(this.wr, this.ball) : null);
     this.db.step(dbI, dt, live && dbI.jump ? planBallPlay(this.db, this.ball) : null);
+    this.report();
+    const contact = this.collide();
+    this.jostle(contact);
+    return contact;
+  }
+
+  /** Tell the game what each athlete just did. Each thing is reported once. */
+  report() {
     for (const who of ['wr', 'db']) {
       const a = this[who];
       if (a.jukedThisTick) this.emit('juke', { who });
       if (a.jumpedThisTick) this.emit('jump', { who });
       if (a.divedThisTick) this.emit('dive', { who });
+      if (a.stumbledThisTick) this.emit('stumble', { who });
       if (a.fellThisTick) this.emit('fall', { who, impact: Math.hypot(a.fall?.vx || 0, a.fall?.vy || 0, a.fall?.vz || 0) });
+      a.jukedThisTick = 0;
+      a.jumpedThisTick = a.divedThisTick = a.stumbledThisTick = a.fellThisTick = false;
     }
-    const contact = this.collide();
-    this.jostle(contact);
-    return contact;
+  }
+
+  /**
+   * Eyes on the ball. A man going up for it turns his whole body to it; a
+   * man on his feet squares up as it arrives, unless it is dropping in over
+   * his shoulder while he runs away from it.
+   */
+  watchBall(live) {
+    const ball = this.ball;
+    for (const who of ['wr', 'db']) {
+      const a = this[who];
+      a.track = live ? ball.pos : null;
+      a.squareUp = false;
+      if (!live || a.hasBall || ball.eta > JUMP.squareUp) continue;
+      // Only the man it is coming to.
+      if (Math.hypot(ball.target.x - a.pos.x, ball.target.z - a.pos.z) > 3) continue;
+      const dx = ball.pos.x - a.pos.x;
+      const dz = ball.pos.z - a.pos.z;
+      const d = Math.hypot(dx, dz);
+      const speed = a.speed;
+      const away = speed > 5.5 && d > 1e-3 && (a.vel.x * dx + a.vel.z * dz) / (speed * d) < -0.35;
+      a.squareUp = ball.tips > 0 || !away;
+    }
+  }
+
+  /**
+   * Hands. Inside arm's reach the defender gets his on the receiver's chest:
+   * the jam takes his speed away and rides him off his line. The receiver
+   * fights back: he knocks the hands down, moves the defender off the spot
+   * and pushes past his shoulder. How much each gets done is strength
+   * against strength. The jam is at full strength within a few yards of the
+   * line and a hand-check after that, and nobody can hold it for long.
+   */
+  handFight(dt) {
+    const wr = this.wr;
+    const db = this.db;
+    const f = this.fight;
+    wr.hands = null;
+    db.hands = null;
+    wr.held = 0;
+    db.held = 0;
+    f.rest = Math.max(0, f.rest - dt);
+    const free = (a) => !a.down && !a.airborne && a.gather <= 0 && !a.attempting && !a.hasBall;
+    const dx = db.pos.x - wr.pos.x;
+    const dz = db.pos.z - wr.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (this.phase !== 'live' || !free(wr) || !free(db) || d > HANDS.show || d < 1e-4) {
+      f.on = false;
+      f.time = 0;
+      if (d > HANDS.show) f.side = 0;
+      return;
+    }
+    const nx = dx / d; // receiver -> defender
+    const nz = dz / d;
+
+    // The defender can only put his hands on a man who is in front of him...
+    const facing = -(nx * Math.sin(db.facing) + nz * Math.cos(db.facing));
+    const dbFront = clamp((facing - 0.1) / 0.5, 0, 1);
+    // ...and the receiver only fights a man who is in his way.
+    let gx = wr.want.x;
+    let gz = wr.want.z;
+    if (Math.hypot(gx, gz) < 0.5) {
+      gx = wr.vel.x;
+      gz = wr.vel.z;
+    }
+    const going = Math.hypot(gx, gz);
+    const ahead = going > 0.5 ? (gx * nx + gz * nz) / going : 0;
+    const inWay = clamp((ahead - 0.05) / 0.45, 0, 1);
+
+    // Which shoulder he is going past: the way he is already heading, else the outside one.
+    const lateral = going > 0.5 ? (gz * nx - gx * nz) / going : 0; // + toward (-nz, nx)
+    if (Math.abs(lateral) > 0.2) f.side = Math.sign(lateral);
+    else if (!f.side) f.side = -nz * this.side >= 0 ? 1 : -1;
+    const tx = -nz * f.side;
+    const tz = nx * f.side;
+
+    const grip = clamp((HANDS.reach - d) / (HANDS.reach - HANDS.full), 0, 1); // leverage
+    const show = clamp((HANDS.show - d) / (HANDS.show - HANDS.reach), 0, 1); // arms coming up
+    const zone = -wr.pos.z <= HANDS.zone ? 1 : HANDS.check;
+    const sw = wr.params.strength;
+    const sd = db.params.strength;
+    const wrEdge = ((2 * sw) / (sw + sd)) ** HANDS.power;
+    const dbEdge = ((2 * sd) / (sw + sd)) ** HANDS.power;
+
+    const jam = f.rest > 0 ? 0 : grip * dbFront * inWay * zone * dbEdge;
+    const push = grip * inWay * wrEdge;
+
+    if (jam > 0) {
+      // Hands on his chest: what he is bringing into the defender comes off,
+      // and he gets ridden back a little besides.
+      const into = wr.vel.x * nx + wr.vel.z * nz;
+      if (into > -1.5) {
+        const take = HANDS.jam * jam * dt;
+        wr.vel.x -= nx * take;
+        wr.vel.z -= nz * take;
+        // The defender feels it too: the more man he is trying to stop, the more he gives.
+        const recoil = (take / dbEdge) * wrEdge * 0.25;
+        db.vel.x += nx * recoil;
+        db.vel.z += nz * recoil;
+      }
+      wr.held = Math.min(1, jam);
+      // The stronger the receiver, the sooner he sheds the hands.
+      f.time += dt;
+      if (f.time > HANDS.maxTime * clamp(dbEdge / wrEdge, 0.4, 1.5)) {
+        f.time = 0;
+        f.rest = HANDS.rest;
+        this.emit('shed');
+      }
+    } else if (grip <= 0) {
+      f.time = 0;
+    }
+
+    if (push > 0) {
+      // The push-off moves the defender back and off to the other side, and
+      // carries the receiver past his shoulder.
+      const shove = HANDS.push * push * dt;
+      db.vel.x += (nx * 0.55 - tx * 0.83) * shove;
+      db.vel.z += (nz * 0.55 - tz * 0.83) * shove;
+      wr.vel.x += tx * shove * HANDS.carry;
+      wr.vel.z += tz * shove * HANDS.carry;
+      db.held = Math.min(1, push);
+    }
+
+    if (inWay > 0) wr.hands = { kind: 'release', k: show, on: grip > 0, side: f.side };
+    if (dbFront > 0) db.hands = { kind: zone === 1 ? 'jam' : 'check', k: show, on: jam > 0, side: -f.side };
+    const on = grip > 0 && (jam > 0 || push > 0);
+    if (on && !f.on) this.emit('hands', { power: Math.max(jam, push) });
+    f.on = on;
   }
 
   /**
@@ -180,12 +327,26 @@ export class Rep {
     a.pos.z -= nz * overlap * aShare;
     b.pos.x += nx * overlap * (1 - aShare);
     b.pos.z += nz * overlap * (1 - aShare);
-    // Kill most of the speed each has into the other.
+    // Each loses most of the speed he has into the other.
     const va = a.vel.x * nx + a.vel.z * nz;
     const vb = -(b.vel.x * nx + b.vel.z * nz);
     if (va > 0 && !a.airborne) {
-      a.vel.x -= nx * va * 0.7 * aShare * 2;
-      a.vel.z -= nz * va * 0.7 * aShare * 2;
+      const lost = va * Math.min(1, 0.7 * aShare * 2);
+      a.vel.x -= nx * lost;
+      a.vel.z -= nz * lost;
+      // A receiver running his route does not stop on a man's chest: he
+      // slides off his shoulder and keeps going. A stronger one keeps more.
+      if (this.phase !== 'done' && !a.down && !a.hasBall) {
+        let tx = -nz;
+        let tz = nx;
+        const lateral = a.vel.x * tx + a.vel.z * tz;
+        const side = Math.abs(lateral) > 0.3 ? Math.sign(lateral) : this.fight.side || (tx * this.side >= 0 ? 1 : -1);
+        tx *= side;
+        tz *= side;
+        const keep = Math.min(0.95, HANDS.slip * clamp(2 * (1 - aShare), 0.5, 1.3));
+        a.vel.x += tx * lost * keep;
+        a.vel.z += tz * lost * keep;
+      }
     }
     if (vb > 0 && !b.airborne) {
       b.vel.x += nx * vb * 0.7 * (1 - aShare) * 2;
@@ -213,31 +374,45 @@ export class Rep {
   }
 
   /**
-   * What a collision does to balance. Before the whistle only a man who has
-   * left his feet can be knocked off them: bumping on the ground stays a bump.
+   * Land a collision on one athlete's balance. The weaker man takes more of
+   * it, and the man who brought the speed is braced for it. He stumbles if
+   * he can and goes down if he cannot; a man in the air who loses it comes
+   * down in a heap, unless `outOfAir` knocks him straight out of it.
+   *   scale   how much of the collision lands at all
+   *   floor   the least balance it can leave a man who is on his feet
+   */
+  strike(contact, who, { scale = 1, floor = 0, outOfAir = false } = {}) {
+    const me = this[who];
+    if (me.down) return null;
+    const share = who === 'wr' ? contact.aShare : 1 - contact.aShare;
+    const mine = Math.max(0, who === 'wr' ? contact.va : contact.vb);
+    const braced = 1 - BALANCE.brace * clamp(mine / Math.max(contact.closing, 1e-3), 0, 1);
+    const sign = who === 'wr' ? -1 : 1;
+    const outcome = me.hit(contact.closing * 2 * share * braced * scale, sign * contact.nx, sign * contact.nz, me.airborne ? 0 : floor);
+    if (outcome === 'fall') {
+      const fall = this.shove(contact, who);
+      if (me.airborne && !outOfAir) me.fall = fall; // he finds out when he lands
+      else me.knockdown(fall, CONTACT.downTime);
+    } else if (outcome === 'stumble' && !me.airborne) {
+      // The hit moves him: his feet have to catch up.
+      const push = contact.closing * (0.35 + 0.5 * share) * 0.6;
+      me.vel.x += sign * contact.nx * push;
+      me.vel.z += sign * contact.nz * push;
+    }
+    return outcome;
+  }
+
+  /**
+   * What a collision does to balance. Before the whistle both men see it
+   * coming, so on their feet they only ever stumble; in the air, or once
+   * the play is over, a big enough hit puts a man down.
    */
   jostle(contact) {
-    if (!contact || contact.closing < CONTACT.minHit || this.securing) return;
+    if (!contact || !contact.fresh || contact.closing < CONTACT.minHit || this.securing) return;
+    this.emit('contact', { power: contact.closing });
     const done = this.phase === 'done';
-    if (contact.fresh) this.emit('contact', { power: contact.closing });
-    for (const who of ['wr', 'db']) {
-      const me = this[who];
-      if (me.down) continue;
-      if (me.airborne) {
-        if (!me.offBalance) {
-          me.offBalance = true;
-          me.fall = this.shove(contact, who);
-        }
-      } else if (done && contact.fresh && contact.closing >= CONTACT.lateHit) {
-        // After the whistle: the man carrying less into the collision goes down.
-        const mine = who === 'wr' ? contact.va : contact.vb;
-        const his = who === 'wr' ? contact.vb : contact.va;
-        const share = who === 'wr' ? contact.aShare : 1 - contact.aShare;
-        if (mine * (1 - share) <= his * share || contact.closing >= CONTACT.lateHit * 1.6) {
-          me.knockdown(this.shove(contact, who), CONTACT.downTime);
-        }
-      }
-    }
+    for (const who of ['wr', 'db']) this.strike(contact, who, done ? {} : { scale: BALANCE.jostle, floor: BALANCE.floor });
+    this.report();
   }
 
   stepLive(dt) {
@@ -288,13 +463,15 @@ export class Rep {
   stepDone(dt) {
     this.tDone += dt;
     const carry = this.tDone < 0.28 ? this.carry : null;
+    this.watchBall(false);
+    this.handFight(dt); // the whistle has gone: this only takes the hands off
     for (const who of ['wr', 'db']) {
       const a = this[who];
       a.speedCap = 1;
       a.coast = true;
       a.step(carry ? carry[who] : NO_INTENT, dt);
-      if (a.fellThisTick) this.emit('fall', { who, impact: Math.hypot(a.fall?.vx || 0, a.fall?.vy || 0, a.fall?.vz || 0) });
     }
+    this.report();
     this.jostle(this.collide());
     this.ball.step(dt);
   }
@@ -430,7 +607,11 @@ export class Rep {
     return undefined;
   }
 
-  /** The defender arrives with the ball in the receiver's hands. */
+  /**
+   * The defender arrives with the ball in the receiver's hands. Whether the
+   * ball stays there is one question; whether either man stays on his feet
+   * is another, and that one is settled by balance.
+   */
   resolveHit(contact) {
     const s = this.securing;
     const wr = this.wr;
@@ -438,18 +619,14 @@ export class Rep {
     const p = holdOnProbability({ wr, db, closing: contact.closing, catchType: s.info.catchType, airborne: wr.airborne || wr.diving });
     const held = this.rng.chance(p);
     const info = { ...s.info, hit: contact.closing };
-    if (!wr.down && (contact.closing >= CONTACT.knockdown || wr.airborne)) {
-      wr.knockdown(this.shove(contact, 'wr'), CONTACT.downTime);
-    }
-    if (!db.down && db.airborne) {
-      db.offBalance = true;
-      db.fall = this.shove(contact, 'db', 0.6);
-    }
-    this.emit('hit', { power: contact.closing, held });
-    if (held) return this.finish(true, 'catch', { ...info, throughContact: true });
+    const down = this.strike(contact, 'wr', { outOfAir: true }) === 'fall';
+    this.strike(contact, 'db');
+    this.report();
+    this.emit('hit', { power: contact.closing, held, down });
+    if (held) return this.finish(true, 'catch', { ...info, throughContact: true, knockedDown: down });
     wr.hasBall = false;
     this.ball.deflect(this.rng, 0.8);
-    return this.finish(false, 'hit', info);
+    return this.finish(false, 'hit', { ...info, knockedDown: down });
   }
 
   finish(complete, reason, info = {}) {

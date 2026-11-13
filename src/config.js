@@ -58,7 +58,7 @@ export const DIVE = {
   maxSpeed: 9.5,
   reach: 1.15, // how far ahead of the body the hands get
   radius: 0.6,
-  downTime: 0.85, // seconds on the turf afterwards
+  downTime: 0.4, // seconds on the turf afterwards, before he starts to get up
   groundHold: 0.84, // chance a diving catch survives the ground, before hands
 };
 
@@ -68,9 +68,46 @@ export const CONTACT = {
   closing: -1.0, // ...unless he is already falling away from the play, yd/s
   window: 0.45, // seconds the receiver has to secure the ball
   minHit: 1.8, // closing speed where a bump becomes a hit
-  knockdown: 4.2, // closing speed that puts the receiver on the turf
-  lateHit: 4.6, // after the whistle it takes more to knock a man over
-  downTime: 1.0,
+  downTime: 0.55, // seconds a man who was knocked over lies there before getting up
+};
+
+// Leaving the ground under his own power: he loads his legs, then goes up.
+export const JUMP = {
+  load: 0.12, // seconds between deciding to jump and the feet leaving the turf
+  attack: 2.6, // most speed he can add toward the ball as he takes off, yd/s
+  landing: 0.22, // seconds the legs take to soak up a clean landing
+  turnRate: 12, // rad/s he can turn his body to the ball, on the way up too
+  squareUp: 0.5, // a receiver on his feet turns to a ball this close to arriving, seconds
+};
+
+// Staying on his feet. Balance runs from 1 (set) down to 0 (going over).
+export const BALANCE = {
+  absorb: 1.0, // hit power a man shrugs off, yd/s
+  capacity: 4.4, // hit power beyond that which takes all of a set man's balance
+  air: 0.55, // fraction of that with no feet under him
+  brace: 0.45, // how much less the man delivering the hit feels it
+  jostle: 0.4, // before the catch both men see the contact coming: only this much of it lands
+  floor: 0.15, // ...and a man on his feet always keeps at least this much: he stumbles, he does not fall
+  recover: 1.15, // seconds to get all of it back (quicker with agility)
+  stumbleAt: 0.14, // losing more than this in one hit makes him stumble
+  stumble: [0.25, 0.85], // seconds of stumbling after a small loss / a near-total one
+};
+
+// Hands: the fight at the line, and hand-checking down the field.
+export const HANDS = {
+  reach: 1.3, // yards between two men at which hands get on a body
+  full: 0.95, // ...and at which they have all their leverage
+  show: 2.0, // the arms start coming up this far out
+  zone: 5, // yards past the line where the jam is at full strength
+  check: 0.3, // fraction of it a defender can get away with farther downfield
+  jam: 12, // yd/s^2 the jam takes off an evenly matched receiver
+  push: 10, // yd/s^2 the receiver's push-off moves an evenly matched defender
+  carry: 0.4, // fraction of his push that carries the receiver past
+  hold: 0.55, // how much of a man's footwork is taken away with hands on him
+  slip: 0.75, // fraction of his speed an evenly matched receiver keeps sliding past
+  power: 1.4, // how sharply a strength edge tells
+  maxTime: 0.6, // how long an even jam holds before the hands are shed
+  rest: 0.5, // seconds before a shed defender can get his hands back on
 };
 
 // Balls that come off hands and stay alive.
@@ -86,6 +123,7 @@ export const TIP = {
 
 export const FALL = {
   friction: 11, // yd/s^2 sliding on the turf
-  getUp: 0.55, // seconds to get back to his feet
+  getUp: 1.2, // seconds to pick himself up: hands, knees, feet
+  settle: 1.2, // he does not start getting up while still sliding faster than this, yd/s
 };
 

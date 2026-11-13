@@ -1,4 +1,4 @@
-import { FIELD, REP } from '../config.js';
+import { FIELD, REP, HANDS } from '../config.js';
 import { clamp, dist2 } from '../core/vec.js';
 import { blankIntent, steer, playTheBall, runThrough } from './aiCommon.js';
 
@@ -44,6 +44,8 @@ export function moveWeights(tier) {
 /**
  * The rival playing receiver. He freestyles a move from his tree, calls for
  * the ball once he is out of his break with separation, then tracks it.
+ * Against a corner sitting in his way off the line he picks a shoulder and
+ * attacks it, hands first, instead of running into the man's chest.
  */
 export class ReceiverAI {
   constructor({ rng, tier = 1 }) {
@@ -75,6 +77,11 @@ export class ReceiverAI {
     this.breakDelay = 0.2 + 0.3 * raw * this.rng.range(0.6, 1);
     this.patience = this.breakDelay + this.rng.range(0.1, 0.4);
     this.jumpLead = this.rng.range(0.75, 1.1);
+    // The release: usually the shoulder on the side of his first break.
+    const first = this.move.pts[Math.min(1, this.move.pts.length - 1)][0];
+    const toward = Math.abs(first) > 0.5 ? Math.sign(first) * side : this.rng.chance(0.5) ? 1 : -1;
+    this.releaseX = this.rng.chance(0.75) ? toward : -toward; // +x or -x
+    this.releaseJuke = this.rng.chance(0.3 + 0.4 * clamp((this.tier - 1) / 7, 0, 1));
   }
 
   update(rep) {
@@ -128,6 +135,7 @@ export class ReceiverAI {
         }
         return this.runMove(rep, out);
       }
+      if (this.idx === 0 && this.release(rep, out)) return;
       steer(out, me, (dx / d) * top, (dz / d) * top);
       out.sprint = true;
       return;
@@ -146,6 +154,31 @@ export class ReceiverAI {
     if (me.pos.z < FIELD.endZ + 2.5 && fz < 0) fz = 0;
     steer(out, me, fx * top, fz * top);
     out.sprint = true;
+  }
+
+  /**
+   * A defender squatting in his path on the way to his first break: go past
+   * one shoulder. Returns true while he is working the release.
+   */
+  release(rep, out) {
+    const me = rep.wr;
+    const db = rep.db;
+    const dz = me.pos.z - db.pos.z; // how far the defender still is downfield of him
+    const dx = db.pos.x - me.pos.x;
+    if (db.down || dz < 0.25 || dz > 2.6 || Math.abs(dx) > 1.1) return false;
+    // Aim a body's width outside the shoulder he picked, level with the man.
+    const ax = db.pos.x + this.releaseX * 1.05 - me.pos.x;
+    const az = -(dz + 0.6);
+    const a = Math.hypot(ax, az);
+    const top = me.params.topSpeed;
+    steer(out, me, (ax / a) * top, (az / a) * top);
+    out.sprint = true;
+    // A quick step that way as the hands come up.
+    if (this.releaseJuke && Math.hypot(dx, dz) < HANDS.reach + 0.35) {
+      out.juke = this.releaseX;
+      this.releaseJuke = false;
+    }
+    return true;
   }
 
   maybeCall(rep, out) {

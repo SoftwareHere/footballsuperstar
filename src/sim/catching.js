@@ -62,29 +62,31 @@ const JUMP = Object.freeze({ dive: false });
 
 /**
  * How should this athlete go for the ball if he leaves his feet right now?
- * A plain jump unless the ball is coming down out of jumping reach and a dive
- * would get there: then { dive: true, x, z, speed, air, t }.
+ * Usually a jump: { dive: false, x, z, t } says where and when the ball
+ * arrives, so he can push off toward it. When it is coming down out of
+ * jumping reach and a dive would get there: { dive: true, x, z, speed, air, t }.
  *
  * `aim` is where he believes the ball is coming down (defaults to the truth).
  */
 export function planBallPlay(athlete, ball, aim = null) {
   if (ball.state !== 'flight' || !ball.target || athlete.down || athlete.airborne) return JUMP;
-  const low = ball.whenAt(DIVE.height);
-  if (!low || low.t > DIVE.maxTime) return JUMP;
   const target = aim || ball.target;
   const eta = Math.max(ball.eta, 0);
+  const jump = { dive: false, x: target.x, z: target.z, t: eta };
+  const low = ball.whenAt(DIVE.height);
+  if (!low || low.t > DIVE.maxTime) return jump;
   // Where a jump would leave him when the ball gets there.
   const px = athlete.pos.x + athlete.vel.x * eta;
   const pz = athlete.pos.z + athlete.vel.z * eta;
   const gap = Math.hypot(target.x - px, target.z - pz);
-  if (gap <= DIVE.minGap + athlete.params.reachBonus + (athlete.reachAssist || 0)) return JUMP;
+  if (gap <= DIVE.minGap + athlete.params.reachBonus + (athlete.reachAssist || 0)) return jump;
   // Dive at the point where the ball gets down to diving height.
   const lx = low.x + (target.x - ball.target.x);
   const lz = low.z + (target.z - ball.target.z);
   const dx = lx - athlete.pos.x;
   const dz = lz - athlete.pos.z;
   const d = Math.hypot(dx, dz);
-  if (d > DIVE.range || d < 0.5) return JUMP;
+  if (d > DIVE.range || d < 0.5) return jump;
   const air = clamp(low.t + 0.06, DIVE.minAir, DIVE.maxAir);
   // His hands lead his body, so his body has a little less ground to cover.
   const speed = clamp((d - DIVE.reach * 0.7) / Math.max(low.t, 0.12), DIVE.minSpeed, DIVE.maxSpeed);
