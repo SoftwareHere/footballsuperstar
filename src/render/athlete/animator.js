@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GRAVITY } from '../../config.js';
 import { BODY, LEG_LENGTH } from '../../physics/body.js';
 import { clamp } from '../../core/vec.js';
 import { solveTwoBone } from './ik.js';
@@ -8,6 +9,7 @@ const TAU = Math.PI * 2;
 const damp = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
 const smooth = (t) => t * t * (3 - 2 * t);
 const lerp = (a, b, t) => a + (b - a) * t;
+const DIVE_SINK = 0.24; // seconds before he lands that a diving body starts down to the turf
 
 /** A damped spring on one number: follows its target with weight and a little overshoot. */
 class Spring {
@@ -88,6 +90,7 @@ export class Animator {
     this.hadBall = false;
     this.wasAir = false;
     this.diveK = 0;
+    this.sinkK = 0; // 0 flying flat in a dive .. 1 coming down onto the turf
     this.airK = 0;
     this.moodK = 0;
     this.socket = new THREE.Vector3(); // where a ball he is holding sits, world
@@ -114,6 +117,7 @@ export class Animator {
     this.tuck = s.hasBall ? 1 : 0;
     this.hadBall = Boolean(s.hasBall);
     this.diveK = 0;
+    this.sinkK = 0;
     this.airK = 0;
     this.moodK = 0;
     this.wasAir = false;
@@ -185,6 +189,15 @@ export class Animator {
     const grounded = !air && !dive;
     this.airK = damp(this.airK, air ? 1 : 0, air ? 22 : 16, dt);
     this.diveK = damp(this.diveK, dive ? 1 : 0, dive ? 16 : 10, dt);
+    // A dive ends on the turf: as he comes down the body sinks to meet it, so
+    // he is on the ground when the game says he has landed, not above it.
+    let sinking = 0;
+    if (dive) {
+      const vy = s.vy || 0;
+      const landsIn = (vy + Math.sqrt(vy * vy + 2 * GRAVITY * Math.max(0, s.y))) / GRAVITY;
+      sinking = smooth(clamp(1 - landsIn / DIVE_SINK, 0, 1));
+    }
+    this.sinkK = dive ? damp(this.sinkK, sinking, 40, dt) : 0;
     const settled = grounded && speed < 1.6;
     this.moodK = damp(this.moodK, s.mood && settled ? 1 : 0, 6, dt);
     const cele = s.mood === 'celebrate' ? this.moodK : 0;
@@ -238,7 +251,8 @@ export class Animator {
     // ---- pelvis, in the world
     const diveK = this.diveK;
     const pelvis = rig.pelvis;
-    const height = lerp(B.hipHeight + drop + bob + breath + hop, 0.5, diveK);
+    const sinkK = this.sinkK;
+    const height = lerp(B.hipHeight + drop + bob + breath + hop, lerp(0.5, 0.3, sinkK), diveK);
     pelvis.position.set(s.x, s.y + height, s.z);
     // Carry the hips forward a touch when leaning so the feet stay under him.
     pelvis.position.x -= sinF * lean * 0.1 * (1 - diveK);
@@ -249,9 +263,11 @@ export class Animator {
 
     // ---- spine and chest: the shoulders counter the hips
     const reachUp = Math.max(this.arms[0].reach, this.arms[1].reach) * (1 - diveK);
-    e1.set(lean * 0.28 - reachUp * 0.12 - diveK * 0.2, this.twist * 0.16, -bank * 0.35, 'YXZ');
+    // (Laid out he arches his back to keep his head up; coming down he flattens.)
+    const arch = diveK * (1 - 0.6 * sinkK);
+    e1.set(lean * 0.28 - reachUp * 0.12 - arch * 0.2, this.twist * 0.16, -bank * 0.35, 'YXZ');
     rig.spine.quaternion.setFromEuler(e1);
-    e1.set(lean * 0.17 - reachUp * 0.1 - diveK * 0.22 - cele * 0.05, this.twist * 0.2, -bank * 0.3, 'YXZ');
+    e1.set(lean * 0.17 - reachUp * 0.1 - arch * 0.22 - cele * 0.05, this.twist * 0.2, -bank * 0.3, 'YXZ');
     rig.chest.quaternion.setFromEuler(e1);
     this.wSpine.copy(this.wPelvis).multiply(rig.spine.quaternion);
     this.wChest.copy(this.wSpine).multiply(rig.chest.quaternion);

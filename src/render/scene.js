@@ -199,12 +199,13 @@ export class SceneView {
       z: was ? mix(was.z, a.pos.z, alpha) : a.pos.z,
       facing,
       vx: a.vel.x,
+      vy: a.vy,
       vz: a.vel.z,
       speed: a.speed,
       backpedal: a.backpedal,
       airborne: a.airborne,
       attempting: a.attempting,
-      diving: a.diving,
+      diving: a.diving && !a.down, // once he is on the turf the dive is over
       down: a.down,
       rise: a.rise,
       fall: a.fall,
@@ -250,11 +251,20 @@ export class SceneView {
         ball: ballInfo,
         lookAt,
         catcher: role === 'wr',
-        obstacle: other.down ? null : { x: other.pos.x, z: other.pos.z, radius: BODY_RADIUS * 0.85, top: 1.85 },
       });
     }
     const userState = states[userRole];
     const rivalState = states[userRole === 'wr' ? 'db' : 'wr'];
+    // What a man on the turf must not fall through: the other player, who is
+    // either on his feet (a post) or down there with him (his own rag doll).
+    const inTheWay = (other, model) => {
+      const lying = other.down && !(other.rise > 0);
+      if (lying) return model.mode === 'ragdoll' ? { body: model.ragdoll } : null;
+      const top = other.down ? 1.85 * other.rise : 1.85;
+      return { x: other.pos.x, z: other.pos.z, radius: BODY_RADIUS * 0.85, top };
+    };
+    userState.obstacle = inTheWay(rep[userRole === 'wr' ? 'db' : 'wr'], this.rivalModel);
+    rivalState.obstacle = inTheWay(rep[userRole], this.userModel);
     this.userModel.update(dt, userState);
     this.rivalModel.update(dt, rivalState);
 

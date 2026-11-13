@@ -58,7 +58,7 @@ export const DIVE = {
   maxSpeed: 9.5,
   reach: 1.15, // how far ahead of the body the hands get
   radius: 0.6,
-  downTime: 0.85, // seconds on the turf afterwards
+  downTime: 0.6, // seconds lying on the turf once he has stopped sliding
   groundHold: 0.84, // chance a diving catch survives the ground, before hands
 };
 
@@ -70,7 +70,7 @@ export const CONTACT = {
   minHit: 1.8, // closing speed where a bump becomes a hit
   knockdown: 4.2, // closing speed that puts the receiver on the turf
   lateHit: 4.6, // after the whistle it takes more to knock a man over
-  downTime: 1.0,
+  downTime: 0.7, // seconds lying on the turf once he has stopped sliding
 };
 
 // Balls that come off hands and stay alive.
@@ -84,8 +84,16 @@ export const TIP = {
   pop: [2.6, 4.4], // upward speed off the hands, yd/s
 };
 
+// Going to the ground. These follow what the rag doll (physics/ragdoll.js)
+// actually does, so the athlete the game tracks and the body on screen end up
+// in the same place: he topples, the turf takes some of his speed as he
+// lands, and he slides the rest off.
 export const FALL = {
+  topple: 0.54, // seconds for a man knocked off his feet to reach the turf
+  thud: 2.9, // yd/s the turf takes out of him when he lands from his feet
+  grab: 0.3, // ...and laid out in a dive: this share of how fast he came down
   friction: 11, // yd/s^2 sliding on the turf
-  getUp: 0.55, // seconds to get back to his feet
+  still: 1.5, // yd/s: slower than this he has stopped, and can think about getting up
+  getUp: 0.75, // seconds to get back to his feet
 };
 

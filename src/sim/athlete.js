@@ -51,6 +51,8 @@ export class Athlete {
     this.downTimer = 0; // seconds until he starts to get up
     this.rise = 0; // 0 lying .. 1 back on his feet
     this.fall = null; // { vx, vy, vz, high } the shove that put him down
+    this.toppling = 0; // seconds until a man knocked off his feet reaches the turf
+    this.falling = false; // down, but not on the turf yet
     this.securing = false; // ball in his hands but the catch is not finished
     this.catchInfo = null; // { type, toeTap } how he caught it
     this.coast = false; // after the whistle: ease to a stop rather than slam on the brakes
@@ -97,7 +99,9 @@ export class Athlete {
         if (this.diving || this.offBalance) {
           // A dive always ends on the turf, and so does a jump he was hit out of.
           const agile = clamp(norm(this.ratings.agility), 0, 1);
-          this.goDown(DIVE.downTime - 0.25 * agile, this.fall || { vx: 0, vy: -impact, vz: 0, high: false });
+          // Laid out, he is on the turf already; knocked out of a jump, he comes down on his feet and goes over.
+          this.goDown(DIVE.downTime - 0.25 * agile, this.fall || { vx: 0, vy: -impact, vz: 0, high: false }, !this.diving);
+          if (this.diving) this.thud(FALL.grab * impact);
         } else {
           this.recovery = 0.2;
         }
@@ -202,12 +206,18 @@ export class Athlete {
     this.stamina = Math.max(0, this.stamina - 0.06);
   }
 
-  /** Put him on the turf for `seconds`, shoved by `fall` = { vx, vy, vz, high }. */
-  goDown(seconds, fall) {
+  /**
+   * Put him on the turf, to lie there for `seconds` once he has stopped,
+   * shoved by `fall` = { vx, vy, vz, high }. `fromFeet`: he was upright, so he
+   * has to topple over before he is on the ground.
+   */
+  goDown(seconds, fall, fromFeet = false) {
     this.down = true;
     this.downTimer = Math.max(this.downTimer, seconds);
     this.rise = 0;
     this.fall = fall;
+    this.toppling = fromFeet ? FALL.topple : 0;
+    this.falling = fromFeet;
     this.fellThisTick = true;
     this.attempting = false;
     this.sprinting = false;
@@ -225,11 +235,24 @@ export class Athlete {
       this.airborne = false;
       this.vy = Math.min(this.vy, 1) + fall.vy * 0.3;
     }
-    this.goDown(seconds, fall);
+    this.goDown(seconds, fall, true);
   }
 
-  /** On the turf: slide to a stop, lie there, then get up. */
+  /** The turf takes `amount` (yd/s) out of his speed. */
+  thud(amount) {
+    const speed = this.speed;
+    if (speed < 1e-6) return;
+    const k = Math.max(0, speed - amount) / speed;
+    this.vel.x *= k;
+    this.vel.z *= k;
+  }
+
+  /**
+   * Going down and getting back up: he falls (carrying his speed), lands,
+   * slides to a stop, lies there, then gets up.
+   */
   stepDown(dt) {
+    this.toppling = Math.max(0, this.toppling - dt);
     if (this.y > 0 || this.vy > 0) {
       this.y += this.vy * dt;
       this.vy -= GRAVITY * dt;
@@ -237,7 +260,14 @@ export class Athlete {
         this.y = 0;
         this.vy = 0;
       }
-    } else {
+    }
+    const inAir = this.y > 0 || this.vy > 0 || this.toppling > 0;
+    if (!inAir) {
+      if (this.falling) {
+        // He has reached the turf.
+        this.falling = false;
+        this.thud(FALL.thud);
+      }
       const speed = this.speed;
       if (speed > 1e-6) {
         const k = Math.max(0, speed - FALL.friction * dt) / speed;
@@ -249,6 +279,8 @@ export class Athlete {
     this.pos.z += this.vel.z * dt;
     this.clampToWorld();
     this.regen(dt, false);
+    // Nobody gets up while he is still falling or sliding.
+    if (inAir || this.speed > FALL.still) return;
     if (this.downTimer > 0) {
       this.downTimer -= dt;
       return;
@@ -259,6 +291,8 @@ export class Athlete {
       this.diving = false;
       this.rise = 0;
       this.fall = null;
+      this.toppling = 0;
+      this.falling = false;
       this.recovery = 0.25;
       this.vel.x = 0;
       this.vel.z = 0;

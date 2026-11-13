@@ -187,28 +187,57 @@ describe('rep', () => {
 describe('going to the ground', () => {
   const run = { x: 1, z: 0, sprint: true, jump: true, juke: 0 };
 
-  it('a man knocked down ignores his controller, slides to a stop, then gets up', () => {
+  it('a man knocked down ignores his controller, falls, slides to a stop, then gets up', () => {
     const a = new Athlete({ ratings: uniformRatings(70) });
     a.vel.z = -8;
     a.knockdown({ vx: 3, vy: 2, vz: 0, high: true }, 0.5);
     expect(a.down).toBe(true);
     expect(a.fellThisTick).toBe(true);
     const startX = a.pos.x;
-    for (let i = 0; i < 0.45 / SIM_DT; i++) a.step(run, SIM_DT);
-    // Still down: no jump, no sprint, and he is slowing, not accelerating.
-    expect(a.down).toBe(true);
-    expect(a.airborne).toBe(false);
-    expect(a.speed).toBeLessThan(4);
-    expect(a.rise).toBe(0);
-    for (let i = 0; i < (0.1 + FALL.getUp * 0.5) / SIM_DT; i++) a.step(run, SIM_DT);
-    expect(a.down).toBe(true);
-    expect(a.rise).toBeGreaterThan(0);
-    for (let i = 0; i < 1 / SIM_DT; i++) a.step({ ...run, jump: false }, SIM_DT);
+    const hit = a.speed;
+    let t = 0;
+    let landedWith = null; // his speed just after he reaches the turf
+    let stoppedAt = null;
+    let riseAt = null;
+    while (riseAt === null && t < 5) {
+      a.step(run, SIM_DT);
+      t += SIM_DT;
+      expect(a.down).toBe(true);
+      expect(a.airborne).toBe(false);
+      // Going over: he carries the speed he was hit with, whatever he asks for.
+      if (t < FALL.topple - 0.05) expect(a.speed).toBeCloseTo(hit, 6);
+      if (landedWith === null && t > FALL.topple + 0.02) landedWith = a.speed;
+      if (stoppedAt === null && t > FALL.topple && a.speed <= FALL.still) stoppedAt = t;
+      if (a.rise > 0) riseAt = t;
+    }
+    // He lands: the turf takes a bite out of his speed, and he slides the rest off.
+    expect(landedWith).toBeLessThan(hit - FALL.thud);
+    // He does not start to get up until he has stopped, and then lain there
+    // the half second he was put down for.
+    expect(stoppedAt).toBeGreaterThan(FALL.topple);
+    expect(riseAt - stoppedAt).toBeGreaterThan(0.5 - 2 * SIM_DT);
+    expect(riseAt - stoppedAt).toBeLessThan(0.5 + 3 * SIM_DT);
+    for (let i = 0; i < (FALL.getUp + 0.5) / SIM_DT; i++) a.step({ ...run, jump: false }, SIM_DT);
     expect(a.down).toBe(false);
     expect(a.fall).toBe(null);
     // Back under control: he is running the way he was told.
     expect(a.vel.x).toBeGreaterThan(3);
     expect(a.pos.x).toBeGreaterThan(startX + 1);
+  });
+
+  it('nobody gets up while he is still sliding', () => {
+    const a = new Athlete({ ratings: uniformRatings(70) });
+    a.vel.z = -9;
+    // Asked to lie there for no time at all: he still has to land and stop first.
+    a.knockdown({ vx: 0, vy: 2, vz: -6, high: true }, 0);
+    let t = 0;
+    while (a.rise === 0 && t < 5) {
+      expect(a.down).toBe(true);
+      a.step(run, SIM_DT);
+      t += SIM_DT;
+    }
+    expect(t).toBeGreaterThan(FALL.topple);
+    expect(a.speed).toBeLessThanOrEqual(FALL.still);
   });
 
   it('a dive is committed: he flies, lands on the turf, and has to get up', () => {
@@ -229,7 +258,11 @@ describe('going to the ground', () => {
     // He went where he dove, not where the stick was pointing.
     expect(a.pos.z).toBeLessThan(-2);
     expect(Math.abs(a.pos.x)).toBeLessThan(0.01);
-    for (let i = 0; i < (DIVE.downTime + FALL.getUp + 0.2) / SIM_DT; i++) a.step(blankIntent(), SIM_DT);
+    // The turf takes some of his speed as he lands, and he slides the rest off.
+    expect(a.speed).toBeLessThan(7);
+    expect(a.speed).toBeGreaterThan(4);
+    const slide = 7 / FALL.friction;
+    for (let i = 0; i < (slide + DIVE.downTime + FALL.getUp + 0.2) / SIM_DT; i++) a.step(blankIntent(), SIM_DT);
     expect(a.down).toBe(false);
     expect(a.diving).toBe(false);
   });
