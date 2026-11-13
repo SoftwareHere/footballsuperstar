@@ -289,8 +289,10 @@ export class Rep {
       db.held = Math.min(1, push);
     }
 
-    if (inWay > 0) wr.hands = { kind: 'release', k: show, on: grip > 0, side: f.side };
-    if (dbFront > 0) db.hands = { kind: zone === 1 ? 'jam' : 'check', k: show, on: jam > 0, side: -f.side };
+    // Arms come up as they close, and come off a man who has got by.
+    const coming = show * Math.min(1, inWay * 2);
+    if (coming > 0) wr.hands = { kind: 'release', k: coming, on: grip > 0, side: f.side };
+    if (coming > 0 && dbFront > 0) db.hands = { kind: zone === 1 ? 'jam' : 'check', k: coming * dbFront, on: jam > 0, side: -f.side };
     const on = grip > 0 && (jam > 0 || push > 0);
     if (on && !f.on) this.emit('hands', { power: Math.max(jam, push) });
     f.on = on;

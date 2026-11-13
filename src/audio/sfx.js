@@ -141,6 +141,16 @@ export class Sfx {
         this.tone({ freq: 95, to: 60, dur: 0.08, type: 'sine', gain: 0.22 });
         this.noise({ dur: 0.05, gain: 0.1, freq: 700 });
         break;
+      case 'hands':
+        // Palms on pads: the hand fight.
+        this.noise({ dur: 0.045, gain: 0.2, freq: 1500, q: 1.4 });
+        this.tone({ freq: 140, to: 90, dur: 0.05, type: 'sine', gain: 0.14 });
+        break;
+      case 'stumble':
+        // Cleats scrabbling for grip.
+        this.noise({ dur: 0.07, gain: 0.12, freq: 2200, to: 900, q: 1.5 });
+        this.noise({ dur: 0.07, gain: 0.1, freq: 1900, to: 800, q: 1.5, delay: 0.11 });
+        break;
       case 'hit':
         // Pads cracking together.
         this.tone({ freq: 130, to: 38, dur: 0.2, type: 'sine', gain: 0.6 });

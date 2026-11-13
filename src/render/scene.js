@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { QB, BODY_RADIUS } from '../config.js';
+import { QB, BODY_RADIUS, JUMP, GRAVITY } from '../config.js';
+import { P } from '../physics/body.js';
 import { angleDelta } from '../core/vec.js';
 import { createField } from './field.js';
 import { createSkyTexture, SUN_DIR } from './sky.js';
@@ -81,6 +82,8 @@ export class SceneView {
     this.rig = new CameraRig(1);
     this.focus = { x: 0, y: 0, z: 0, speed: 0 };
     this.tmp = new THREE.Vector3();
+    // Where each player's chest and shoulders are, for the other man's hands.
+    this.bodies = [0, 1].map(() => ({ chest: new THREE.Vector3(), sh: [new THREE.Vector3(), new THREE.Vector3()] }));
     this.ballPos = { x: 0, y: 0, z: 0 };
     this.throwClock = 0;
     this.pinned = quality === 'high' || quality === 'low';
@@ -200,14 +203,23 @@ export class SceneView {
       facing,
       vx: a.vel.x,
       vz: a.vel.z,
+      vy: a.vy,
       speed: a.speed,
       backpedal: a.backpedal,
       airborne: a.airborne,
       attempting: a.attempting,
+      // Legs loading for a jump, how far through that he is, and how fast he will leave the turf.
+      loading: a.gather > 0,
+      load: a.gather > 0 ? 1 - a.gather / JUMP.load : 0,
+      jumpSpeed: Math.sqrt(2 * GRAVITY * a.params.jumpHeight),
+      landing: a.landing / JUMP.landing,
       diving: a.diving,
       down: a.down,
       rise: a.rise,
       fall: a.fall,
+      stumble: a.stumbling,
+      shove: a.shoveDir,
+      hands: a.hands,
       calling: a.callTimer > 0,
       hasBall: a.hasBall,
       securing: a.securing,
@@ -216,6 +228,14 @@ export class SceneView {
       throwing: null,
       ...extra,
     };
+  }
+
+  /** Where a model's chest and shoulders were last frame. */
+  bodyOf(model, out) {
+    model.point(P.CHEST, out.chest);
+    model.point(P.SH_L, out.sh[0]);
+    model.point(P.SH_R, out.sh[1]);
+    return out;
   }
 
   /**
@@ -238,9 +258,11 @@ export class SceneView {
     const ballInfo = { x: bp.x, y: bp.y, z: bp.z, live };
 
     const states = {};
+    const modelOf = (role) => (role === userRole ? this.userModel : this.rivalModel);
     for (const role of ['wr', 'db']) {
       const a = rep[role];
       const other = rep[role === 'wr' ? 'db' : 'wr'];
+      const foe = this.bodyOf(modelOf(role === 'wr' ? 'db' : 'wr'), this.bodies[role === 'wr' ? 0 : 1]);
       let lookAt = null;
       if (live || sim.state === 'loose') lookAt = bp;
       else if (role === 'db' && rep.phase !== 'done') lookAt = { x: other.pos.x, y: 1.7, z: other.pos.z };
@@ -249,6 +271,7 @@ export class SceneView {
         crouch: pre ? role : null,
         ball: ballInfo,
         lookAt,
+        foe,
         catcher: role === 'wr',
         obstacle: other.down ? null : { x: other.pos.x, z: other.pos.z, radius: BODY_RADIUS * 0.85, top: 1.85 },
       });

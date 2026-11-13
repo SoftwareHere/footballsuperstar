@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { BODY, P, PARTICLE_COUNT } from '../physics/body.js';
 import { Ragdoll } from '../physics/ragdoll.js';
+import { GetUp, standAlong } from '../physics/getup.js';
+import { angleDelta } from '../core/vec.js';
 import { buildRig } from './athlete/rig.js';
 import { Animator } from './athlete/animator.js';
 import { poseFromRagdoll } from './athlete/ragdollPose.js';
@@ -29,11 +31,19 @@ function numberTexture(number, color, outline) {
 }
 
 const tmp = new THREE.Vector3();
+const LIE = {};
+const FOOT_L = new THREE.Vector3();
+const FOOT_R = new THREE.Vector3();
+
+const BLEND = 0.2; // seconds to ease from the end of getting up into the animation
+const TURN = 6; // rad/s he turns to face the play once he is back on his feet
 
 /**
  * A football player: a jointed, padded body that is either animated from
  * what the athlete is doing, or thrown around as a rag doll when he has been
- * knocked off his feet, with a blend back as he gets up.
+ * knocked off his feet. He gets up as a rag doll too: its muscles take it
+ * through pushing up, kneeling and standing, so his weight is on the turf
+ * the whole way, and only then does the animation take over again.
  *
  * The model faces +z; one unit is one yard.
  */
@@ -57,7 +67,11 @@ export class AthleteModel {
     this.group = this.rig.root;
     this.animator = new Animator(this.rig);
     this.ragdoll = new Ragdoll();
-    this.mode = 'anim'; // 'anim' | 'ragdoll' | 'recover'
+    this.getUp = new GetUp();
+    this.mode = 'anim'; // 'anim' | 'ragdoll' (lying, or picking himself up)
+    this.blend = 0; // seconds left easing from the rag doll's last pose into the animation
+    this.yawBias = 0; // he got up facing this far off where the game says he faces
+    this.lieUp = 0; // which way up he is lying, smoothed
     this.points = Array.from({ length: PARTICLE_COUNT }, () => [0, 0, 0]);
     this.prevPoints = Array.from({ length: PARTICLE_COUNT }, () => [0, 0, 0]);
     this.velocities = Array.from({ length: PARTICLE_COUNT }, () => [0, 0, 0]);
@@ -95,50 +109,88 @@ export class AthleteModel {
   reset() {
     this.mode = 'anim';
     this.ragdoll.active = false;
+    this.getUp.stop();
+    this.blend = 0;
+    this.yawBias = 0;
     this.frames = 0;
     this.animator.started = false;
   }
 
   /**
-   * state: { x, y, z, facing, vx, vz, speed, backpedal, airborne, attempting,
-   *          diving, down, rise, fall, calling, hasBall, securing, mood,
-   *          crouch, throwing, release, ball, lookAt, catcher, catchType,
-   *          obstacle }
+   * state: { x, y, z, facing, vx, vz, vy, speed, backpedal, airborne,
+   *          attempting, loading, load, jumpSpeed, landing, diving, down,
+   *          rise, fall, stumble, shove, hands, foe, calling, hasBall,
+   *          securing, mood, crouch, throwing, release, ball, lookAt,
+   *          catcher, catchType, obstacle }
    */
   update(dt, s) {
     this.impact = 0;
-    const lying = Boolean(s.down) && !(s.rise > 0);
-    if (lying) {
+    if (s.down) {
       if (this.mode !== 'ragdoll') this.startRagdoll(s);
-      const anchor = { x: s.x, z: s.z, strength: 0.045 };
-      this.ragdoll.step(dt, { anchor, obstacles: s.obstacle ? [s.obstacle] : null });
-      this.impact = this.ragdoll.impact;
-      poseFromRagdoll(this.rig, this.ragdoll);
+      const rag = this.ragdoll;
+      const up = this.getUp;
+      const options = { obstacles: s.obstacle ? [s.obstacle] : null };
+      if (s.rise > 0) {
+        // Picking himself up: his muscles take him through it.
+        if (!up.active) up.begin(rag, s.x, s.z);
+        rag.moveTo(up.goal, up.update(s.rise));
+        rag.tone = 1 - up.drive;
+      } else {
+        // Lying where he fell. Keep the spot he will stand up on where the game has him.
+        up.stop();
+        rag.moveTo(null, 0);
+        rag.tone = 1;
+        const lie = rag.lie(LIE);
+        this.lieUp += (lie.up - this.lieUp) * Math.min(1, dt * 6);
+        options.anchor = { x: s.x, z: s.z, strength: 0.045, along: standAlong(this.lieUp) };
+      }
+      rag.step(dt, options);
+      this.impact = rag.impact;
+      poseFromRagdoll(this.rig, rag);
       this.holdBallLimp();
-    } else if (s.down) {
-      // Getting up: blend from where the rag doll left him to his feet.
-      if (this.mode !== 'recover') {
-        this.joints.forEach((j, i) => this.fromQuats[i].copy(j.quaternion));
-        this.fromPos.copy(this.rig.pelvis.position);
-        this.animator.reset(s);
-        this.mode = 'recover';
-      }
-      this.animator.update(dt, s);
-      const w = smooth(Math.min(1, Math.max(0, s.rise)));
-      this.joints.forEach((j, i) => j.quaternion.slerpQuaternions(this.fromQuats[i], j.quaternion, w));
-      this.rig.pelvis.position.lerpVectors(this.fromPos, this.rig.pelvis.position, w);
-      this.socket.copy(this.animator.socket);
-      this.socketDir.copy(this.animator.socketDir);
     } else {
-      if (this.mode !== 'anim') {
-        this.mode = 'anim';
-        this.ragdoll.active = false;
+      if (this.mode !== 'anim') this.standUp(s);
+      // He got up facing the way he was lying; now he turns to the play.
+      if (this.yawBias !== 0) {
+        const step = TURN * dt;
+        this.yawBias = Math.abs(this.yawBias) <= step ? 0 : this.yawBias - Math.sign(this.yawBias) * step;
+        s = { ...s, facing: s.facing + this.yawBias };
       }
       this.animator.update(dt, s);
+      if (this.blend > 0) {
+        this.blend = Math.max(0, this.blend - dt);
+        const w = 1 - smooth(this.blend / BLEND); // 0 the rag doll's pose .. 1 the animation
+        this.joints.forEach((j, i) => j.quaternion.slerpQuaternions(this.fromQuats[i], j.quaternion, w));
+        this.rig.pelvis.position.lerpVectors(this.fromPos, this.rig.pelvis.position, w);
+      }
       this.socket.copy(this.animator.socket);
       this.socketDir.copy(this.animator.socketDir);
     }
     this.track(dt);
+  }
+
+  /** On his feet again: hand the body from the rag doll back to the animation. */
+  standUp(s) {
+    this.mode = 'anim';
+    const rag = this.ragdoll;
+    const up = this.getUp;
+    const finished = up.active;
+    if (finished) {
+      // Ease from exactly where getting up left him, with his feet where they are.
+      this.joints.forEach((j, i) => this.fromQuats[i].copy(j.quaternion));
+      this.fromPos.copy(this.rig.pelvis.position);
+      this.blend = BLEND;
+      this.yawBias = angleDelta(s.facing, up.heading);
+      const feet = [rag.get(P.FT_L, FOOT_L), rag.get(P.FT_R, FOOT_R)];
+      this.animator.reset({ ...s, facing: s.facing + this.yawBias }, feet);
+    } else {
+      this.blend = 0;
+      this.yawBias = 0;
+      this.animator.reset(s);
+    }
+    up.stop();
+    rag.moveTo(null, 0);
+    rag.active = false;
   }
 
   /** Remember where every body part is, so a fall starts with the motion it had. */
@@ -180,6 +232,11 @@ export class AthleteModel {
 
   startRagdoll(s) {
     this.mode = 'ragdoll';
+    this.blend = 0;
+    this.yawBias = 0;
+    this.getUp.stop();
+    this.lieUp = 0;
+    this.ragdoll.tone = 1;
     const vx = s.vx || 0;
     const vz = s.vz || 0;
     const usable = this.frames >= 2 && this.lastDt > 1e-5;
