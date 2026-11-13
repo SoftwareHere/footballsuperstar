@@ -20,6 +20,7 @@ const MUSCLE = 0.03;
 const TONE_TIME = 0.22; // seconds for the bracing to fade
 const TONE_TENSE = 0.02;
 const TONE_LIMP = 0.0035;
+const EASE_BELOW = 0.6; // yd: hips lower than this, a limp body starts to ease out flat
 
 // Joint limits, radians.
 const HIP_FLEX = 2.0; // thigh up in front
@@ -423,7 +424,10 @@ export class Ragdoll {
       pos[b + 2] -= dz * k * wb;
     }
     if (rigid) return;
-    const ease = TONE_LIMP + (TONE_TENSE - TONE_LIMP) * this.tone;
+    // Braced, he holds his shape wherever he is. Limp, he only eases out flat
+    // once he is down: nothing holds a falling man up.
+    const low = Math.max(0, Math.min(1, (EASE_BELOW - pos[P.PELVIS * 3 + 1]) / 0.3));
+    const ease = TONE_LIMP * low + TONE_TENSE * this.tone;
     for (const c of EASE) {
       const a = c.a * 3;
       const b = c.b * 3;

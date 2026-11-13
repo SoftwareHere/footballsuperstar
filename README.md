@@ -138,7 +138,8 @@ src/
     match.js         first-to-N scoring and possession
   physics/         the rag doll (no rendering, runs in Node)
     body.js          body dimensions shared by the skeleton and the rag doll
-    ragdoll.js       particles, joint limits, turf contact
+    ragdoll.js       particles, bones, joint limits, muscle, contact with
+                     the turf and with other players
   progression/     XP, levels, rivals, save data
   render/          Three.js scene, sky, stadium, field, effects, camera
     athlete/         the player: skeleton and meshes, inverse kinematics,
@@ -148,14 +149,37 @@ src/
 tests/             unit, rules and balance tests
 ```
 
+### Going to the ground
+
+A player who is knocked off his feet, or lands a dive, is handed from the
+animation to the rag doll and back again when he gets up.
+
+- **One body, two descriptions.** The simulation tracks a downed athlete as a
+  point: he topples carrying his speed, the turf takes some of it as he lands,
+  he slides the rest off, and only once he has stopped does he lie there and
+  then get up (`FALL` in `config.js`). The rag doll is started with the
+  athlete's own velocity and its turf friction is the same number, so the body
+  on screen ends up where the game says the athlete is without being dragged
+  there. The `FALL` constants were fitted to what the rag doll does; a test
+  holds the two together.
+- **Nothing inside the body moves the body.** Bones, joint limits and muscle
+  damping all leave the momentum of the body as a whole alone, so he falls and
+  flies like a thrown object: no drag in the air, and no creeping on the
+  ground. Only gravity, the turf and other players change where he is going.
+- **Joints have limits.** Hips stay inside a cone, knees fold one way about
+  their own thigh, upper arms do not go behind the back. He is braced for a
+  moment as he is hit, then limp, and a heap eases out flat.
+- **Getting up is on the ground.** His feet stay on the turf and walk in under
+  him as he rises, and nothing passes through the grass on the way.
+
 ## Tests
 
 ```bash
 npm test
 ```
 
-This runs the unit tests (rules, catching, the rag doll, save data) plus a
-balance suite that simulates thousands of AI-vs-AI reps to check that ratings
+This runs the unit tests (rules, catching, the rag doll's physics, save data)
+plus a balance suite that simulates thousands of AI-vs-AI reps to check that ratings
 decide who wins, so levelling up really helps.
 
 There is also a browser smoke test that plays full games through the keyboard
