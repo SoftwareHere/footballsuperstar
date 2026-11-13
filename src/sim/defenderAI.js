@@ -1,4 +1,4 @@
-import { HANDS } from '../config.js';
+import { HANDS, JUMP } from '../config.js';
 import { clamp } from '../core/vec.js';
 import { norm } from './ratings.js';
 import { blankIntent, steer, playTheBall, classifyBreak } from './aiCommon.js';
@@ -132,7 +132,7 @@ export class DefenderAI {
           z: ball.target.z + this.aimError.z * blur + (qz / qn) * 0.3,
         };
         // He has to actually get to the catch point to make a play on it.
-        playTheBall(out, me, ball, aim, this.jumpLead, 1.15);
+        playTheBall(out, me, ball, aim, this.jumpLead, JUMP.defend);
         return out;
       }
     }

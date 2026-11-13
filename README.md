@@ -7,9 +7,11 @@ wins more.
 
 It runs in the browser (Three.js). There are no art or audio files: the
 stadium, players and sounds are all generated in code. The players are jointed
-bodies animated from what they are doing (their feet plant, they lean into
-cuts, their hands go to the ball) and they turn into rag dolls when they are
-knocked off their feet.
+bodies animated from what they are doing: their feet plant, they lean into
+cuts, their hands go to the ball and to each other, and they load their legs
+and leave the ground to jump. They fight to stay on their feet through
+contact, turn into rag dolls when they lose that fight, and pick themselves
+up off the turf afterwards.
 
 ## Play it
 
@@ -55,10 +57,31 @@ The result is in `dist/`.
 - **Tipped balls stay live.** A ball that comes off somebody's hands can pop
   up instead of dying. The ring turns orange and moves to where it is coming
   down, and either player can still catch it.
+- **Go up and get it.** A jump is a real one: your player loads his legs
+  (his hands are up from the moment you press), leaves the turf off his
+  plant foot, pushes off toward the ball and turns his whole body to it,
+  then lands and has to gather himself before he can cut again.
 - **Finish the catch.** Getting your hands on it is not enough. If the
   defender arrives while you are securing the ball, the hit can jar it loose;
   if you dove for it, you have to hold on when you hit the turf. On defense,
   when you cannot get to the ball, run through the receiver as it arrives.
+- **Hands at the line.** Inside arm's reach the hands come up on their own.
+  A corner who is squared up in front of the receiver jams him: it takes
+  his speed away and rides him off his route. The receiver fights the hands,
+  pushes off and slides past a shoulder rather than stopping on the man's
+  chest. Who gets the better of it is strength against strength. The jam is
+  at full strength for the first five yards and only a hand-check after
+  that, a strong receiver sheds it sooner, and the hands come off when the
+  ball is in the air. On offense, steer for a shoulder (a juke as the hands
+  come up helps); on defense, stay in front of him.
+- **Balance.** Contact takes balance away instead of knocking a man straight
+  over. A bump is shrugged off; a hit makes him stumble, arms out, a few
+  ragged steps with less speed and less control until he catches himself; a
+  hit that takes all of it puts him on the turf. The weaker man loses more,
+  the man who brings the hit loses less, and a man in the air has less to
+  stand on. Before the catch a man on his feet only ever stumbles. After it,
+  a receiver who holds on through a hit can stay up and stumble on, or go
+  down with the ball.
 - Interceptions, drops, swats, balls jarred loose, catches out of bounds and
   balls that hit the turf are all incompletions. The rep ends when the catch
   is finished.
@@ -110,10 +133,10 @@ spend on seven stats, all of which matter on both sides of the ball:
 | --- | --- |
 | Speed | Top speed |
 | Acceleration | How quickly you reach it |
-| Agility | Sharper cuts and jukes; tighter coverage; quicker back to your feet after a dive |
+| Agility | Sharper cuts and jukes; tighter coverage; better balance through contact and quicker to get it back |
 | Hands | Catches in traffic; holding on through a hit or the ground; breakups and interceptions |
 | Jumping | Reach on high balls |
-| Strength | Winning contact and contested catches; holding on through a hit, and delivering one |
+| Strength | Winning the hand fight at the line, both ways; staying on your feet through a hit, and delivering one; contested catches |
 | Stamina | A bigger sprint tank that refills faster between reps |
 
 There are eight rivals, from a JV walk-on to an All-Pro. Beating one unlocks
@@ -128,17 +151,19 @@ src/
   game.js          game loop, match flow, keyboard controller
   core/            input, seeded RNG, vector helpers
   sim/             the football simulation (no rendering, runs in Node)
-    athlete.js       movement, stamina, jumping, diving, getting knocked down
+    athlete.js       movement, stamina, jumping, diving, balance, going down
     ball.js          the football: flight, tips, deflections
     qb.js            the AI quarterback and lead-pass solver
     receiverAI.js    the rival on offense
     defenderAI.js    the rival on defense
     catching.js      reach, catch types, contest, hit and breakup odds
-    rep.js           one rep: presnap -> live -> flight -> done
+    rep.js           one rep: presnap -> live -> flight -> done; the hand
+                     fight and what a collision does to each man
     match.js         first-to-N scoring and possession
   physics/         the rag doll (no rendering, runs in Node)
     body.js          body dimensions shared by the skeleton and the rag doll
-    ragdoll.js       particles, joint limits, turf contact
+    ragdoll.js       particles, joint limits and stiffness, turf contact
+    getup.js         how a man on the turf gets back to his feet
   progression/     XP, levels, rivals, save data
   render/          Three.js scene, sky, stadium, field, effects, camera
     athlete/         the player: skeleton and meshes, inverse kinematics,
@@ -154,9 +179,9 @@ tests/             unit, rules and balance tests
 npm test
 ```
 
-This runs the unit tests (rules, catching, the rag doll, save data) plus a
-balance suite that simulates thousands of AI-vs-AI reps to check that ratings
-decide who wins, so levelling up really helps.
+This runs the unit tests (rules, catching, contact, the rag doll, getting up,
+save data) plus a balance suite that simulates thousands of AI-vs-AI reps to
+check that ratings decide who wins, so levelling up really helps.
 
 There is also a browser smoke test that plays full games through the keyboard
 on both offense and defense. It needs [Playwright](https://playwright.dev)

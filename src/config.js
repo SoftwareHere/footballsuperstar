@@ -74,10 +74,11 @@ export const CONTACT = {
 // Leaving the ground under his own power: he loads his legs, then goes up.
 export const JUMP = {
   load: 0.12, // seconds between deciding to jump and the feet leaving the turf
-  attack: 2.6, // most speed he can add toward the ball as he takes off, yd/s
+  attack: 2.2, // most speed he can add toward the ball as he takes off, yd/s
   landing: 0.22, // seconds the legs take to soak up a clean landing
   turnRate: 12, // rad/s he can turn his body to the ball, on the way up too
   squareUp: 0.5, // a receiver on his feet turns to a ball this close to arriving, seconds
+  defend: 1.4, // a defender goes up only if he expects to be within this of the ball, yards
 };
 
 // Staying on his feet. Balance runs from 1 (set) down to 0 (going over).
@@ -101,7 +102,7 @@ export const HANDS = {
   zone: 5, // yards past the line where the jam is at full strength
   check: 0.3, // fraction of it a defender can get away with farther downfield
   jam: 12, // yd/s^2 the jam takes off an evenly matched receiver
-  push: 10, // yd/s^2 the receiver's push-off moves an evenly matched defender
+  push: 7, // yd/s^2 the receiver's push-off moves an evenly matched defender
   carry: 0.4, // fraction of his push that carries the receiver past
   hold: 0.55, // how much of a man's footwork is taken away with hands on him
   slip: 0.75, // fraction of his speed an evenly matched receiver keeps sliding past
