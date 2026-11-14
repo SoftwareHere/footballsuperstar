@@ -146,6 +146,17 @@ export class Sfx {
         this.noise({ dur: 0.045, gain: 0.2, freq: 1500, q: 1.4 });
         this.tone({ freq: 140, to: 90, dur: 0.05, type: 'sine', gain: 0.14 });
         break;
+      case 'punch':
+        // The jam: two palms into a chest plate.
+        this.tone({ freq: 115, to: 55, dur: 0.11, type: 'sine', gain: 0.4 });
+        this.noise({ dur: 0.06, gain: 0.32, freq: 1300, to: 600, q: 1 });
+        this.noise({ dur: 0.04, gain: 0.16, freq: 2800, q: 2.5, delay: 0.02 });
+        break;
+      case 'shed':
+        // Hands knocked away: a quick slap and a swish.
+        this.noise({ dur: 0.035, gain: 0.16, freq: 2400, q: 1.6 });
+        this.noise({ dur: 0.09, gain: 0.07, freq: 1200, to: 3000, q: 1.1, delay: 0.03 });
+        break;
       case 'stumble':
         // Cleats scrabbling for grip.
         this.noise({ dur: 0.07, gain: 0.12, freq: 2200, to: 900, q: 1.5 });

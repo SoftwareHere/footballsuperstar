@@ -284,6 +284,14 @@ export class Game {
       case 'hands':
         this.sfx.play('hands'); // pads and palms: the fight at the line
         break;
+      case 'punch':
+        // The jam landing on the chest plate. You feel your own.
+        this.sfx.play('punch');
+        if (e.power > 0.6) this.view.rig.shake(Math.min(0.12, 0.05 * e.power));
+        break;
+      case 'shed':
+        this.sfx.play('shed');
+        break;
       case 'stumble':
         this.sfx.play('stumble');
         break;

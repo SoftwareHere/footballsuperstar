@@ -8,7 +8,9 @@ import { blankIntent, steer, playTheBall, classifyBreak } from './aiCommon.js';
  * (his reaction time), keeps a cushion on top of vertical routes, drives on
  * anything underneath, can be frozen by a juke, and breaks on the ball once
  * he reads the throw. Lined up in press he sits on the line and gets his
- * hands on the receiver before he opens up to run with him.
+ * hands on the receiver before he opens up to run with him. Beaten, he runs
+ * the receiver down; when he gets his body on him he rides him (that part
+ * is the rep's doing: hands come up on their own for everybody).
  *
  * `expect` ('in' | 'out' | 'deep' | 'short') is what the receiver has been
  * running lately. A defender who expects a break cheats his alignment toward

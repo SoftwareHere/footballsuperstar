@@ -66,14 +66,29 @@ The result is in `dist/`.
   if you dove for it, you have to hold on when you hit the turf. On defense,
   when you cannot get to the ball, run through the receiver as it arrives.
 - **Hands at the line.** Inside arm's reach the hands come up on their own.
-  A corner who is squared up in front of the receiver jams him: it takes
-  his speed away and rides him off his route. The receiver fights the hands,
-  pushes off and slides past a shoulder rather than stopping on the man's
-  chest. Who gets the better of it is strength against strength. The jam is
-  at full strength for the first five yards and only a hand-check after
-  that, a strong receiver sheds it sooner, and the hands come off when the
-  ball is in the air. On offense, steer for a shoulder (a juke as the hands
-  come up helps); on defense, stay in front of him.
+  A corner who is squared up in front of the receiver jams him. The hands
+  land with a punch that takes a bite out of his speed and rocks his
+  balance, then stay on his chest: he can only drive into them at a walk,
+  and he has to fight his way to a shoulder to get by. Who gets the better
+  of it is strength against strength: a stronger receiver drives through and
+  sheds the hands sooner, a much weaker one is stood up at arm's length
+  until he does. The jam is at full strength for the first five yards and
+  only a hand-check after that. Once the receiver sheds it he has beaten it:
+  there is no second jam until there is daylight between them again.
+- **Riding him.** A corner who has hold of a receiver keeps it when the
+  receiver gets past: his hands go to the hip and the back and he rides him.
+  So does a corner who is trailing and runs into him. He does not bounce
+  off, he stays on him. Being ridden costs the receiver about a quarter of
+  his top speed and half his footwork, and when he tries to pull away the
+  corner hangs on and is towed along. It works anywhere on the field. The
+  receiver sheds it in time (sooner if he is stronger), and a juke is the
+  quickest way out; after that the corner has to hit him again to get his
+  hands back on. All hands come off when the ball is in the air.
+- **Contact costs speed.** It never hands any out. A receiver who runs into
+  a man comes off him slower, sliding past a shoulder; nobody is slung past
+  a defender or sent off faster than he was going. On offense, steer for a
+  shoulder (a juke as the hands come up helps); on defense, get in front of
+  him to jam, and get your body on him to ride.
 - **Balance.** Contact takes balance away instead of knocking a man straight
   over. A bump is shrugged off; a hit makes him stumble, arms out, a few
   ragged steps with less speed and less control until he catches himself; a
@@ -136,7 +151,7 @@ spend on seven stats, all of which matter on both sides of the ball:
 | Agility | Sharper cuts and jukes; tighter coverage; better balance through contact and quicker to get it back |
 | Hands | Catches in traffic; holding on through a hit or the ground; breakups and interceptions |
 | Jumping | Reach on high balls |
-| Strength | Winning the hand fight at the line, both ways; staying on your feet through a hit, and delivering one; contested catches |
+| Strength | Winning the hand fight, both ways: the jam, the release, and how long a corner can ride you; staying on your feet through a hit, and delivering one; contested catches |
 | Stamina | A bigger sprint tank that refills faster between reps |
 
 There are eight rivals, from a JV walk-on to an All-Pro. Beating one unlocks
@@ -158,7 +173,8 @@ src/
     defenderAI.js    the rival on defense
     catching.js      reach, catch types, contest, hit and breakup odds
     rep.js           one rep: presnap -> live -> flight -> done; the hand
-                     fight and what a collision does to each man
+                     fight (jam, release, ride) and what a collision does
+                     to each man
     match.js         first-to-N scoring and possession
   physics/         the rag doll (no rendering, runs in Node)
     body.js          body dimensions shared by the skeleton and the rag doll
