@@ -265,10 +265,10 @@ export class Animator {
     const landed = Boolean(hands && hands.on);
     if (landed && !this.hadHandOn && grounded) {
       if (hands.kind === 'jam') {
-        this.lean.v += 3.2;
-        this.drop.v -= 0.7;
+        this.lean.v += 2.2;
+        this.drop.v -= 0.6;
       } else if (hands.kind === 'release') {
-        this.lean.v -= 3.6;
+        this.lean.v -= 3.2;
       } else if (hands.kind === 'ride') {
         this.lean.v += 1.6;
       } else if (hands.kind === 'ridden') {
