@@ -57,8 +57,9 @@ const e1 = new THREE.Euler(0, 0, 0, 'YXZ');
  *     load and the arms cock, the legs drive him up off that foot, he
  *     reaches at the top, and his feet come back down under him and soak
  *     up the landing.
- *   - Hands go to the other man too: a corner's to the receiver's chest, a
- *     receiver's to the shoulder he is fighting past.
+ *   - Hands go to the other man too: a corner's punch into the receiver's
+ *     chest and then onto his hip and back as he rides him, a receiver's to
+ *     the shoulder he is fighting past or back at the hands that are on him.
  *   - Knocked off balance he stumbles: ragged, wide steps, arms out.
  */
 export class Animator {
@@ -106,6 +107,7 @@ export class Animator {
     this.reachYaw = 0; // shoulders turned to the ball
     this.handK = 0; // hands up for the man in front of him
     this.handOn = 0; // ...and on him
+    this.hadHandOn = false;
     this.wasStumble = 0;
     this.socket = new THREE.Vector3(); // where a ball he is holding sits, world
     this.socketDir = new THREE.Vector3(0, 0, 1);
@@ -251,10 +253,29 @@ export class Animator {
     leanT += sad * 0.26 - cele * 0.07;
     crouch += sad * 0.03;
     if (hands) {
-      // Hands on a man: sunk a little and leaning into him.
-      leanT += (hands.kind === 'release' ? 0.14 : 0.1) * handK;
-      if (hands.kind !== 'release') crouch += 0.07 * handK;
+      // Hands on a man: sunk a little and leaning into him. A receiver with
+      // a man hanging on his back is pulled up out of his lean instead.
+      const into = { release: 0.14, jam: 0.18, check: 0.1, ride: 0.16, ridden: -0.14 }[hands.kind] ?? 0.1;
+      leanT += into * handK * (hands.kind === 'ridden' ? this.handOn : 1);
+      if (hands.kind === 'jam') crouch += 0.1 * handK;
+      else if (hands.kind === 'check' || hands.kind === 'ride') crouch += 0.06 * handK;
     }
+    // The moment the hands land: the corner throws his weight into the
+    // punch, and the receiver is rocked back by it.
+    const landed = Boolean(hands && hands.on);
+    if (landed && !this.hadHandOn && grounded) {
+      if (hands.kind === 'jam') {
+        this.lean.v += 3.2;
+        this.drop.v -= 0.7;
+      } else if (hands.kind === 'release') {
+        this.lean.v -= 3.6;
+      } else if (hands.kind === 'ride') {
+        this.lean.v += 1.6;
+      } else if (hands.kind === 'ridden') {
+        this.lean.v -= 2;
+      }
+    }
+    this.hadHandOn = landed;
     // Catching his balance: bent over it, low.
     leanT += 0.36 * stumble;
     crouch += 0.1 * stumble + 0.14 * clamp(s.landing || 0, 0, 1);
@@ -280,6 +301,10 @@ export class Animator {
       // Dips the shoulder nearer the man and slides by.
       const foeLeft = (s.foe.chest.x - s.x) * cosF - (s.foe.chest.z - s.z) * sinF;
       bankT -= Math.sign(foeLeft) * 0.13 * handK;
+    } else if (hands && hands.kind === 'ridden') {
+      // Dragged at from one side: he leans away from it, fighting to get free.
+      const foeLeft = (s.foe.chest.x - s.x) * cosF - (s.foe.chest.z - s.z) * sinF;
+      bankT += Math.sign(foeLeft) * 0.1 * this.handOn + 0.05 * this.handOn * Math.sin(this.time * 17);
     }
     const quick = loading || air ? 24 : 11;
     const lean = this.lean.step(leanT, quick, 0.8, dt);
@@ -727,21 +752,48 @@ export class Animator {
       } else if (hands && handK > 0.01 && !hasBall && throwing === null) {
         const foe = s.foe;
         const near = foeLeft >= 0 === (i === 0); // the arm on the other man's side
-        // Hands come up in front of him first, elbows bent, ready...
-        rel.lerp(v3.set(side * 0.17, hands.kind === 'jam' ? -0.1 : -0.16, 0.29), handK);
-        // ...and go onto the man once he is within reach.
-        if (hands.kind === 'jam') {
-          // Both hands on his chest plate, punching in turn.
-          const punch = 0.82 + 0.18 * Math.sin(this.time * 10 + i * Math.PI);
-          world = v3.copy(foe.chest).add(v1.set(side * 0.1, 0.02, 0).applyQuaternion(this.wChest));
-          reach = handOn * punch;
-        } else if (near) {
-          // One hand: a check on his hip downfield, or knocking his shoulder away to get past.
-          world = v3.copy(foe.sh[foe.sh[0].distanceToSquared(this.chestPos) < foe.sh[1].distanceToSquared(this.chestPos) ? 0 : 1]);
-          if (hands.kind === 'check') world.lerp(foe.chest, 0.5).y -= 0.2;
-          reach = handOn;
+        const nearShoulder = foe.sh[foe.sh[0].distanceToSquared(this.chestPos) < foe.sh[1].distanceToSquared(this.chestPos) ? 0 : 1];
+        if (hands.kind === 'ridden') {
+          // Hands on him from behind. The arm on that side chops back at
+          // them; the other one keeps driving.
+          if (near) {
+            rel.lerp(v3.set(side * 0.3, -0.3, -0.16), handK);
+            world = v3.copy(nearShoulder).lerp(foe.chest, 0.5);
+            world.y -= 0.12;
+            reach = handOn * (0.3 + 0.12 * Math.sin(this.time * 13));
+          }
+          rate = 22;
+        } else {
+          // Hands come up in front of him first, elbows bent, ready...
+          rel.lerp(v3.set(side * 0.17, hands.kind === 'jam' ? -0.08 : -0.16, hands.kind === 'jam' ? 0.24 : 0.29), handK);
+          // ...and go onto the man once he is within reach.
+          if (hands.kind === 'jam') {
+            // Both hands into his chest plate: they shoot out, come back and
+            // shoot out again, one after the other.
+            const beat = Math.sin(this.time * 13 + i * Math.PI);
+            const punch = 0.7 + 0.3 * Math.max(-0.4, beat);
+            world = v3.copy(foe.chest).add(v1.set(side * 0.1, 0.03, 0).applyQuaternion(this.wChest));
+            reach = handOn * punch;
+            rate = 30;
+          } else if (hands.kind === 'ride') {
+            // Riding him: the near hand on his hip, the far one across his
+            // back, pressing all the way.
+            world = v3.copy(foe.chest);
+            if (near) {
+              world.lerp(nearShoulder, 0.25).y -= 0.34;
+            } else {
+              world.lerp(nearShoulder, 0.6).y -= 0.04;
+            }
+            reach = handOn * (0.92 + 0.08 * Math.sin(this.time * 11 + i * 2));
+            rate = 26;
+          } else if (near) {
+            // One hand: a check on his hip downfield, or knocking his shoulder away to get past.
+            world = v3.copy(nearShoulder);
+            if (hands.kind === 'check') world.lerp(foe.chest, 0.5).y -= 0.2;
+            reach = handOn;
+          }
+          if (rate < 24) rate = 24;
         }
-        rate = 24;
       }
       if (world && throwing !== null) reach = smooth(clamp((throwing - 0.6) / 0.4, 0, 1));
 

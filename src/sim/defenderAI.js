@@ -127,9 +127,12 @@ export class DefenderAI {
         const qx = rep.qb.pos.x - ball.target.x;
         const qz = rep.qb.pos.z - ball.target.z;
         const qn = Math.hypot(qx, qz) || 1;
+        // He plays it at the receiver's back shoulder. Bodies do not bounce
+        // off each other, so cutting in front of the catch means going
+        // through the man who is making it.
         const aim = {
-          x: ball.target.x + this.aimError.x * blur + (qx / qn) * 0.3,
-          z: ball.target.z + this.aimError.z * blur + (qz / qn) * 0.3,
+          x: ball.target.x + this.aimError.x * blur - (qx / qn) * 0.2,
+          z: ball.target.z + this.aimError.z * blur - (qz / qn) * 0.2,
         };
         // He has to actually get to the catch point to make a play on it.
         playTheBall(out, me, ball, aim, this.jumpLead, JUMP.defend);
