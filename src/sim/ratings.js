@@ -16,7 +16,7 @@ export const STAT_INFO = {
   agility: { label: 'Agility', blurb: 'Sharper cuts and jukes, tighter mirroring on defense, and better balance through contact.' },
   hands: { label: 'Hands', blurb: 'Secure catches in traffic. On defense: more breakups and picks.' },
   jumping: { label: 'Jumping', blurb: 'Higher reach on jump balls, both ways.' },
-  strength: { label: 'Strength', blurb: 'Win the hand fight at the line, stay on your feet through a hit, win 50/50 balls.' },
+  strength: { label: 'Strength', blurb: 'Win the hand fight: jam him, ride him, or drive through it. Stay on your feet through a hit, win 50/50 balls.' },
   stamina: { label: 'Stamina', blurb: 'A bigger sprint tank that refills faster between reps.' },
 };
 

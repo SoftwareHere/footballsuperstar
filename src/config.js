@@ -78,7 +78,7 @@ export const JUMP = {
   landing: 0.22, // seconds the legs take to soak up a clean landing
   turnRate: 12, // rad/s he can turn his body to the ball, on the way up too
   squareUp: 0.5, // a receiver on his feet turns to a ball this close to arriving, seconds
-  defend: 1.4, // a defender goes up only if he expects to be within this of the ball, yards
+  defend: 1.2, // a defender goes up only if he expects to be within this of the ball, yards
 };
 
 // Staying on his feet. Balance runs from 1 (set) down to 0 (going over).
@@ -94,21 +94,32 @@ export const BALANCE = {
   stumble: [0.25, 0.85], // seconds of stumbling after a small loss / a near-total one
 };
 
-// Hands: the fight at the line, and hand-checking down the field.
+// Hands: the fight at the line, hand-checking down the field, and riding a
+// receiver who has got past. Contact costs speed; it never hands any out.
 export const HANDS = {
   reach: 1.3, // yards between two men at which hands get on a body
   full: 0.95, // ...and at which they have all their leverage
   show: 2.0, // the arms start coming up this far out
   zone: 5, // yards past the line where the jam is at full strength
   check: 0.3, // fraction of it a defender can get away with farther downfield
-  jam: 12, // yd/s^2 the jam takes off an evenly matched receiver
-  push: 7, // yd/s^2 the receiver's push-off moves an evenly matched defender
+  jam: 15, // yd/s^2 the jam takes off an evenly matched receiver
+  drive: 2, // yd/s: how fast a receiver can drive into the hands, scaled by who is stronger
+  punch: 2.2, // yd/s the first punch takes off him as the hands land
+  jolt: 0.4, // ...and how hard it rocks his balance, as hit power
+  push: 6, // yd/s^2 the receiver's push-off moves an evenly matched defender
   carry: 0.4, // fraction of his push that carries the receiver past
+  work: 3, // yd/s: the most that hands alone can move a man who was going slower
   hold: 0.55, // how much of a man's footwork is taken away with hands on him
-  slip: 0.75, // fraction of his speed an evenly matched receiver keeps sliding past
+  slow: 0.3, // ...and how much of his top speed
+  slip: 0.75, // fraction of the speed he brings into a man that an evenly matched receiver turns sideways, sliding past
   power: 1.4, // how sharply a strength edge tells
-  maxTime: 0.6, // how long an even jam holds before the hands are shed
-  rest: 0.5, // seconds before a shed defender can get his hands back on
+  ride: 0.8, // hands on a receiver who has got past: this much of a squared-up jam, anywhere on the field
+  tether: 14, // yd/s^2 a riding defender can hang on with when the receiver pulls away
+  juke: 0.3, // fraction of the grip that survives a sidestep
+  shake: 3, // ...and how much faster a sidestep sheds the hands
+  maxTime: 0.8, // how long evenly matched hands stay on before they are shed
+  rest: 0.6, // seconds before a shed defender can get his hands back on
+  beaten: 1.3, // the least leverage a receiver's push-off has on a defender whose jam he has shed
 };
 
 // Balls that come off hands and stay alive.

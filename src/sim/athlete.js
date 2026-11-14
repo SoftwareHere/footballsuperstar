@@ -61,8 +61,8 @@ export class Athlete {
     this.sinceContact = 9;
 
     // Hands. Set every tick by the rep while two men are within arm's reach.
-    this.hands = null; // { kind: 'jam' | 'check' | 'release', k, side }
-    this.held = 0; // 0..1 how much of his footwork the other man's hands are taking away
+    this.hands = null; // { kind: 'jam' | 'check' | 'ride' | 'release' | 'ridden', k, on, side }
+    this.held = 0; // 0..1 how much of his footwork and top speed the other man's hands are taking away
 
     // Ending up on the turf.
     this.down = false; // on the turf, or getting back up; ignores his controller
@@ -192,12 +192,16 @@ export class Athlete {
 
     let tx = moving ? dx * maxSpeed : 0;
     let tz = moving ? dz * maxSpeed : 0;
-    if (this.jukeLock > 0) {
-      tx = this.jukeDir * p.jukeSpeed;
-      control = Math.max(control, 0.8); // the sidestep is what gets him off the hands
-    }
+    if (this.jukeLock > 0) tx = this.jukeDir * p.jukeSpeed;
+    // That is what he is trying to do, and what the quarterback and the
+    // other man read. With hands on him he does not get all of it: nobody
+    // runs flat out with a man hanging on him.
     this.want.x = tx;
     this.want.z = tz;
+    const dragged = 1 - HANDS.slow * this.held;
+    tz *= dragged;
+    if (this.jukeLock > 0) control = Math.max(control, 0.8); // the sidestep is what gets him off the hands
+    else tx *= dragged;
 
     // Building speed in the direction you're already going uses acceleration;
     // braking and cutting use the (agility-driven) cut rate.

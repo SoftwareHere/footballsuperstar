@@ -17,6 +17,14 @@ import {
 } from './catching.js';
 import { classifyBreak } from './aiCommon.js';
 
+/** Scale a man's velocity down to `limit` if he is going faster than that. */
+function limitSpeed(a, limit) {
+  const speed = a.speed;
+  if (speed <= limit || speed < 1e-6) return;
+  a.vel.x *= limit / speed;
+  a.vel.z *= limit / speed;
+}
+
 /**
  * One rep of 1-on-1s: receiver vs. defender with the AI QB throwing.
  *
@@ -30,10 +38,12 @@ import { classifyBreak } from './aiCommon.js';
  * through the ground if he dove for it, before the rep is his.
  *
  * So is everything before it. Within arm's reach the two men fight with
- * their hands: the defender jams, the receiver pushes off and slides past,
- * and the stronger man gets the better of it. Contact takes balance away
- * rather than knocking anybody straight over: a man stumbles, catches
- * himself if he can, and goes down only when his balance is gone.
+ * their hands: the defender jams, the receiver pushes off and works past,
+ * a defender who is beaten or trailing rides him, and the stronger man gets
+ * the better of it. Contact only ever costs speed: nobody is flung past a
+ * man or bounced off him. It takes balance away rather than knocking
+ * anybody straight over: a man stumbles, catches himself if he can, and
+ * goes down only when his balance is gone.
  */
 export class Rep {
   constructor({ wr, db, rng, side = 1 }) {
@@ -69,9 +79,12 @@ export class Rep {
     this.tipReason = null; // what the incompletion is if a tipped ball falls
     this.tipInfo = null;
     this.touching = false;
-    // The hand fight: how long the jam has held, time until a shed defender can
-    // get his hands back on, and which shoulder the receiver is going past.
-    this.fight = { on: false, time: 0, rest: 0, side: 0 };
+    // The hand fight: what the defender's hands are doing ('jam' | 'check' |
+    // 'ride'), how long they have been on, time until a shed defender can get
+    // them back on, which shoulder the receiver is going past, whether the
+    // punch has landed, whether the defender has hold of him (and so can
+    // ride him), and whether his jam has been beaten.
+    this.fight = { on: false, mode: null, time: 0, rest: 0, side: 0, punched: false, latched: false, spent: false };
     this.carry = null; // momentum carried through the whistle
     this.wrCtl.setup?.(this, 'wr');
     this.dbCtl.setup?.(this, 'db');
@@ -192,12 +205,23 @@ export class Rep {
   }
 
   /**
-   * Hands. Inside arm's reach the defender gets his on the receiver's chest:
-   * the jam takes his speed away and rides him off his line. The receiver
-   * fights back: he knocks the hands down, moves the defender off the spot
-   * and pushes past his shoulder. How much each gets done is strength
-   * against strength. The jam is at full strength within a few yards of the
-   * line and a hand-check after that, and nobody can hold it for long.
+   * Hands. Inside arm's reach the defender gets his on the receiver.
+   *
+   * Squared up in front of him it is a jam: the hands land with a punch that
+   * takes speed off him and rocks his balance, then stay on his chest, taking
+   * away what he brings and riding him off his line. The receiver fights
+   * back: he knocks the hands down, moves the defender off the spot and works
+   * past his shoulder. The jam is at full strength within a few yards of the
+   * line and a hand-check after that.
+   *
+   * Once the receiver is by him, or when the defender has caught him from
+   * behind, the hands stay on: he rides him. That takes the receiver's top
+   * speed and his footwork, and when the receiver tries to pull away the
+   * defender hangs on and is towed along. It works anywhere on the field.
+   *
+   * How much each man gets done is strength against strength, nobody keeps
+   * his hands on for ever, and a sidestep is the quickest way out of them.
+   * None of it makes anybody faster: hands move a man, they do not fling him.
    */
   handFight(dt) {
     const wr = this.wr;
@@ -214,17 +238,25 @@ export class Rep {
     const d = Math.hypot(dx, dz);
     if (this.phase !== 'live' || !free(wr) || !free(db) || d > HANDS.show || d < 1e-4) {
       f.on = false;
+      f.mode = null;
       f.time = 0;
-      if (d > HANDS.show) f.side = 0;
+      f.punched = false;
+      f.latched = false;
+      if (d > HANDS.show) {
+        f.side = 0;
+        f.spent = false;
+      }
       return;
     }
     const nx = dx / d; // receiver -> defender
     const nz = dz / d;
 
-    // The defender can only put his hands on a man who is in front of him...
+    // The defender can only put his hands on a man who is in front of him.
     const facing = -(nx * Math.sin(db.facing) + nz * Math.cos(db.facing));
     const dbFront = clamp((facing - 0.1) / 0.5, 0, 1);
-    // ...and the receiver only fights a man who is in his way.
+    // Where is the receiver trying to go? At the defender, and he is in the
+    // way; anywhere else, and he is past him, with the defender on his hip
+    // or on his back.
     let gx = wr.want.x;
     let gz = wr.want.z;
     if (Math.hypot(gx, gz) < 0.5) {
@@ -234,6 +266,7 @@ export class Rep {
     const going = Math.hypot(gx, gz);
     const ahead = going > 0.5 ? (gx * nx + gz * nz) / going : 0;
     const inWay = clamp((ahead - 0.05) / 0.45, 0, 1);
+    const past = going > 0.5 ? clamp((0.3 - ahead) / 0.4, 0, 1) * (1 - inWay) : 0;
 
     // Which shoulder he is going past: the way he is already heading, else the outside one.
     const lateral = going > 0.5 ? (gz * nx - gx * nz) / going : 0; // + toward (-nz, nx)
@@ -250,37 +283,64 @@ export class Rep {
     const wrEdge = ((2 * sw) / (sw + sd)) ** HANDS.power;
     const dbEdge = ((2 * sd) / (sw + sd)) ** HANDS.power;
 
-    const jam = f.rest > 0 ? 0 : grip * dbFront * inWay * zone * dbEdge;
-    const push = grip * inWay * wrEdge;
+    // What the defender's hands can do, before leverage: nothing while he
+    // gets them back after being shed, and little through a sidestep.
+    const able = f.rest > 0 ? 0 : dbFront * dbEdge * (wr.jukeLock > 0 ? HANDS.juke : 1);
+    // A receiver who has shed the jam has beaten it: the defender gets no
+    // second one until there is daylight between them again.
+    const jam = f.spent ? 0 : able * grip * inWay * zone;
+    // He can only ride a man he has got hold of: one he has already jammed,
+    // or one he has run into. Until then his hands are only reaching.
+    if (grip <= 0 || dbFront <= 0) f.latched = false;
+    else if (this.touching && able > 0) f.latched = true;
+    const ride = f.latched ? able * grip * past * HANDS.ride : 0;
+    // The receiver's push-off. Once he has the hands beaten it is the
+    // defender who is being handled, however strong he is.
+    const push = grip * inWay * (f.spent ? Math.max(wrEdge, HANDS.beaten) : wrEdge);
+    const wrWas = wr.speed;
+    const dbWas = db.speed;
+
+    // With hands on his chest the receiver can only close on the defender
+    // so fast: at a walk if they are evenly matched, quicker if he is the
+    // stronger man, and backwards if he is much the weaker. It is the speed
+    // between them that the hands work on, not the speed they share.
+    const drive = clamp(HANDS.drive * (1.5 * wrEdge - dbEdge), -0.5, 2 * HANDS.drive);
+    const into = (wr.vel.x - db.vel.x) * nx + (wr.vel.z - db.vel.z) * nz;
+
+    if (!f.punched && !f.spent && f.rest <= 0 && grip >= 0.5 && dbFront * inWay > 0.5) {
+      // The hands land: a punch to the chest plate. It takes a bite out of
+      // what he is bringing, and it rocks him. A much stronger man's punch
+      // knocks him off his stride.
+      f.punched = true;
+      f.latched = true;
+      const power = able * inWay * zone;
+      const bite = Math.min(HANDS.punch * power, Math.max(0, into - drive));
+      wr.vel.x -= nx * bite;
+      wr.vel.z -= nz * bite;
+      this.emit('punch', { power });
+      if (wr.hit(BALANCE.absorb + HANDS.jolt * power, -nx, -nz, BALANCE.floor) === 'stumble') {
+        this.emit('stumble', { who: 'wr' }); // his own step would forget it before it is reported
+      }
+    }
 
     if (jam > 0) {
       // Hands on his chest: what he is bringing into the defender comes off,
-      // and he gets ridden back a little besides.
-      const into = wr.vel.x * nx + wr.vel.z * nz;
-      if (into > -1.5) {
-        const take = HANDS.jam * jam * dt;
+      // down to what he can drive through them.
+      const closing = (wr.vel.x - db.vel.x) * nx + (wr.vel.z - db.vel.z) * nz;
+      if (closing > drive) {
+        const take = Math.min(closing - drive, HANDS.jam * jam * dt);
         wr.vel.x -= nx * take;
         wr.vel.z -= nz * take;
         // The defender feels it too: the more man he is trying to stop, the more he gives.
-        const recoil = (take / dbEdge) * wrEdge * 0.25;
+        const recoil = (take / dbEdge) * wrEdge * 0.2;
         db.vel.x += nx * recoil;
         db.vel.z += nz * recoil;
       }
-      wr.held = Math.min(1, jam);
-      // The stronger the receiver, the sooner he sheds the hands.
-      f.time += dt;
-      if (f.time > HANDS.maxTime * clamp(dbEdge / wrEdge, 0.4, 1.5)) {
-        f.time = 0;
-        f.rest = HANDS.rest;
-        this.emit('shed');
-      }
-    } else if (grip <= 0) {
-      f.time = 0;
     }
 
     if (push > 0) {
       // The push-off moves the defender back and off to the other side, and
-      // carries the receiver past his shoulder.
+      // turns the receiver past his shoulder.
       const shove = HANDS.push * push * dt;
       db.vel.x += (nx * 0.55 - tx * 0.83) * shove;
       db.vel.z += (nz * 0.55 - tz * 0.83) * shove;
@@ -289,12 +349,59 @@ export class Rep {
       db.held = Math.min(1, push);
     }
 
-    // Arms come up as they close, and come off a man who has got by.
+    if (ride > 0) {
+      // Hands on his hip and his back. When he pulls away the defender hangs
+      // on: it drags at the receiver, and it tows the defender along.
+      const opening = -((wr.vel.x - db.vel.x) * nx + (wr.vel.z - db.vel.z) * nz);
+      if (opening > 0) {
+        const pull = Math.min(opening / 2, HANDS.tether * Math.min(1, ride) * dt);
+        wr.vel.x += nx * pull;
+        wr.vel.z += nz * pull;
+        db.vel.x -= nx * pull;
+        db.vel.z -= nz * pull;
+      }
+    }
+
+    // Hands on a man take his footwork and his top speed (see Athlete.step).
+    const hold = Math.max(jam, ride);
+    wr.held = Math.min(1, hold);
+    if (hold > 0) {
+      // The stronger the receiver, the sooner he sheds them.
+      f.time += dt * (wr.jukeLock > 0 ? HANDS.shake : 1);
+      if (f.time > HANDS.maxTime * clamp((dbEdge / wrEdge) ** 0.6, 0.55, 1.3)) {
+        f.time = 0;
+        f.rest = HANDS.rest;
+        f.punched = false;
+        f.latched = false;
+        f.spent = jam >= ride;
+        this.emit('shed');
+      }
+    } else if (grip <= 0) {
+      f.time = 0;
+    }
+
+    // Nobody comes out of it faster than he went in. Hands can get a slow
+    // man moving, and a defender who is hanging on can be towed up to his
+    // own top speed, but that is all.
+    limitSpeed(wr, Math.max(wrWas, HANDS.work));
+    limitSpeed(db, Math.max(dbWas, ride > 0 ? db.params.topSpeed : HANDS.work));
+
+    // Arms come up as they close. In front of him the receiver fights the
+    // hands; once he is by, he runs with them on him.
     const coming = show * Math.min(1, inWay * 2);
-    if (coming > 0) wr.hands = { kind: 'release', k: coming, on: grip > 0, side: f.side };
-    if (coming > 0 && dbFront > 0) db.hands = { kind: zone === 1 ? 'jam' : 'check', k: coming * dbFront, on: jam > 0, side: -f.side };
-    const on = grip > 0 && (jam > 0 || push > 0);
-    if (on && !f.on) this.emit('hands', { power: Math.max(jam, push) });
+    const trailing = show * past;
+    const riding = trailing >= coming;
+    const k = Math.max(coming, trailing);
+    if (k > 0 && (!riding || dbFront > 0)) {
+      wr.hands = { kind: riding ? 'ridden' : 'release', k: riding ? k * dbFront : k, on: riding ? ride > 0 : grip > 0, side: f.side };
+    }
+    if (k > 0 && dbFront > 0) {
+      const kind = riding ? 'ride' : zone === 1 ? 'jam' : 'check';
+      db.hands = { kind, k: k * dbFront, on: riding ? ride > 0 : jam > 0, side: -f.side };
+    }
+    const on = grip > 0 && (jam > 0 || push > 0 || ride > 0);
+    f.mode = !on ? null : ride > jam ? 'ride' : zone === 1 ? 'jam' : 'check';
+    if (on && !f.on) this.emit('hands', { power: Math.max(jam, push, ride), kind: f.mode });
     f.on = on;
   }
 
@@ -302,6 +409,11 @@ export class Rep {
    * Bodies can't overlap; the stronger athlete gives less ground.
    * Returns { closing, nx, nz, fresh } when they are touching: how fast they
    * came together along the line from receiver to defender.
+   *
+   * What a man loses is speed he was closing with, never speed the two of
+   * them share: a defender who runs into the back of a receiver going the
+   * same way slows to the receiver's pace and stays on him, rather than
+   * stopping dead and bouncing off.
    */
   collide() {
     const a = this.wr;
@@ -329,15 +441,19 @@ export class Rep {
     a.pos.z -= nz * overlap * aShare;
     b.pos.x += nx * overlap * (1 - aShare);
     b.pos.z += nz * overlap * (1 - aShare);
-    // Each loses most of the speed he has into the other.
-    const va = a.vel.x * nx + a.vel.z * nz;
-    const vb = -(b.vel.x * nx + b.vel.z * nz);
-    if (va > 0 && !a.airborne) {
-      const lost = va * Math.min(1, 0.7 * aShare * 2);
+    const va = a.vel.x * nx + a.vel.z * nz; // the receiver's speed toward the defender
+    const vb = -(b.vel.x * nx + b.vel.z * nz); // ...and the defender's toward him
+    const closing = va + vb;
+    if (closing > 0 && va > 0 && !a.airborne) {
+      const was = a.speed;
+      const lost = Math.min(va, closing) * Math.min(1, 0.7 * aShare * 2);
       a.vel.x -= nx * lost;
       a.vel.z -= nz * lost;
       // A receiver running his route does not stop on a man's chest: he
       // slides off his shoulder and keeps going. A stronger one keeps more.
+      // Part of what he lost is turned sideways. That is a change of
+      // direction, never a gain: leaning on a man he keeps the speed his
+      // legs give him, and running into one he comes off slower.
       if (this.phase !== 'done' && !a.down && !a.hasBall) {
         let tx = -nz;
         let tz = nx;
@@ -345,18 +461,20 @@ export class Rep {
         const side = Math.abs(lateral) > 0.3 ? Math.sign(lateral) : this.fight.side || (tx * this.side >= 0 ? 1 : -1);
         tx *= side;
         tz *= side;
-        const keep = Math.min(0.95, HANDS.slip * clamp(2 * (1 - aShare), 0.5, 1.3));
+        const keep = Math.min(0.9, HANDS.slip * clamp(2 * (1 - aShare), 0.5, 1.3));
         a.vel.x += tx * lost * keep;
         a.vel.z += tz * lost * keep;
+        limitSpeed(a, this.touching ? was : was - lost * (1 - keep));
       }
     }
-    if (vb > 0 && !b.airborne) {
-      b.vel.x += nx * vb * 0.7 * (1 - aShare) * 2;
-      b.vel.z += nz * vb * 0.7 * (1 - aShare) * 2;
+    if (closing > 0 && vb > 0 && !b.airborne) {
+      const lost = Math.min(vb, closing) * Math.min(1, 0.7 * (1 - aShare) * 2);
+      b.vel.x += nx * lost;
+      b.vel.z += nz * lost;
     }
     const fresh = !this.touching;
     this.touching = true;
-    return { closing: va + vb, va, vb, nx, nz, aShare, fresh };
+    return { closing, va, vb, nx, nz, aShare, fresh };
   }
 
   /** The shove one athlete takes from a collision, as a fall for the renderer. */
@@ -396,10 +514,13 @@ export class Rep {
       if (me.airborne && !outOfAir) me.fall = fall; // he finds out when he lands
       else me.knockdown(fall, CONTACT.downTime);
     } else if (outcome === 'stumble' && !me.airborne) {
-      // The hit moves him: his feet have to catch up.
+      // The hit moves him: his feet have to catch up. It can turn him and it
+      // can get him going, but it does not send him off faster than he was.
       const push = contact.closing * (0.35 + 0.5 * share) * 0.6;
+      const was = me.speed;
       me.vel.x += sign * contact.nx * push;
       me.vel.z += sign * contact.nz * push;
+      limitSpeed(me, Math.max(was, push));
     }
     return outcome;
   }

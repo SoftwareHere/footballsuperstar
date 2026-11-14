@@ -10,11 +10,11 @@ const key = (k) => `<kbd>${k}</kbd>`;
 
 const HINTS = {
   'wr:presnap': `${key('Space')} Snap the ball`,
-  'wr:live': `${key('WASD')} Run past his shoulder ${key('Shift')} Sprint ${key('Q')}${key('E')} Juke ${key('Enter')} Call for the ball`,
+  'wr:live': `${key('WASD')} Run past his shoulder ${key('Shift')} Sprint ${key('Q')}${key('E')} Juke out of his hands ${key('Enter')} Call for the ball`,
   'wr:called': `${key('WASD')} Keep running: he leads you ${key('Shift')} Sprint`,
   'wr:flight': `Get to the ring ${key('Space')} Jump, or dive if it is out of reach`,
   'db:presnap': `${key('WASD')} Set your cushion ${key('Space')} Ready`,
-  'db:live': `${key('WASD')} Stay in front of him to jam ${key('Shift')} Sprint ${key('Q')}${key('E')} Break step`,
+  'db:live': `${key('WASD')} Jam him from in front, ride him from behind ${key('Shift')} Sprint ${key('Q')}${key('E')} Break step`,
   'db:flight': `Get to the ring ${key('Space')} Jump or dive to swat, or run through him`,
   done: `${key('Space')} Next rep`,
 };
@@ -312,7 +312,7 @@ export class UI {
             <li><b>Offense is freestyle.</b> No plays. Run anything, then press ${key('Enter')} to call for the ball. The QB leads you from your speed and direction, so call it coming out of your break.</li>
             <li><b>${QB.deadline}-second pressure.</b> Nobody calls for it in ${QB.deadline} seconds? The QB throws anyway.</li>
             <li><b>The ring.</b> A yellow ring shows where the ball comes down. A white ring closes on it as the ball arrives: be there and press ${key('Space')}. Too far away to jump for it? ${key('Space')} lays you out in a dive instead.</li>
-            <li><b>Hands.</b> Get within arm's reach and the hands come up on their own. A corner squared up in front of the receiver jams him; the receiver pushes off and slides past a shoulder. Steer for a shoulder, not his chest. Strength decides who wins it.</li>
+            <li><b>Hands.</b> Get within arm's reach and the hands come up on their own. A corner squared up in front of the receiver jams him: a punch to the chest, then hands that hold him up while he fights to a shoulder. A corner who is beaten or trailing and runs into the receiver stays on him and rides him, which costs the receiver speed and footwork. Strength decides who wins it, and a juke is the quickest way out. Contact never makes anybody faster.</li>
             <li><b>It is physical.</b> A ball off the hands can pop up and stay live: the ring turns orange and anybody can come down with it. And a catch is not safe until it is finished. A defender who arrives with the ball can jar it loose, so on defense, run through the receiver. A hit costs balance: you stumble, and a big enough one puts you on the turf.</li>
             <li><b>Level up.</b> Every game earns XP. Spend skill points on stats that work on both sides of the ball.</li>
           </ul>

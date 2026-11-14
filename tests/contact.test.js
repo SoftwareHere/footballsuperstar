@@ -6,6 +6,8 @@ import { Athlete } from '../src/sim/athlete.js';
 import { blankIntent } from '../src/sim/aiCommon.js';
 import { uniformRatings } from '../src/sim/ratings.js';
 import { angleDelta } from '../src/core/vec.js';
+import { ReceiverAI } from '../src/sim/receiverAI.js';
+import { DefenderAI } from '../src/sim/defenderAI.js';
 import { runRep } from './simHarness.js';
 
 const athlete = (rating = 70, extra = {}) => new Athlete({ ratings: { ...uniformRatings(rating), ...extra }, x: 0, z: 0 });
@@ -324,12 +326,20 @@ function release({ wrStrength = 65, dbStrength = 65, corner = true, yards = 6, s
   rep.wr.pos.z -= start;
   rep.db.pos.z -= start;
   const out = { time: null, shoved: 0, wrHands: new Set(), dbHands: new Set(), events: new Set(), rep };
+  Object.assign(out, { punches: 0, stumbles: 0, handsOn: 0, touching: 0, lowBalance: 1 });
   for (let i = 0; i < ticks(8) && out.time === null; i++) {
     if (!corner) rep.db.pos.x = rep.wr.pos.x + 10;
     rep.step(SIM_DT);
     if (rep.wr.hands) out.wrHands.add(rep.wr.hands.kind);
     if (rep.db.hands) out.dbHands.add(rep.db.hands.kind);
-    for (const e of rep.events) out.events.add(e.type);
+    for (const e of rep.events) {
+      out.events.add(e.type);
+      if (e.type === 'punch') out.punches += 1;
+      if (e.type === 'stumble' && e.who === 'wr') out.stumbles += 1;
+    }
+    if (rep.wr.held > 0) out.handsOn += SIM_DT; // seconds with the corner's hands on him
+    if (rep.touching) out.touching += SIM_DT; // ...and with their bodies together
+    out.lowBalance = Math.min(out.lowBalance, rep.wr.balance);
     rep.events.length = 0;
     out.shoved = Math.max(out.shoved, -rep.db.vel.z); // how hard the corner was driven back
     if (-rep.wr.pos.z >= yards + start) out.time = rep.t;
@@ -345,11 +355,55 @@ describe('hands at the line', () => {
     expect(even.dbHands.has('jam')).toBe(true);
     expect(even.wrHands.has('release')).toBe(true);
     expect(even.events.has('hands')).toBe(true);
-    // The jam costs him time, but he is through: he does not sit on the man's chest.
+    // The jam costs him real time, but he is through: he does not sit on the man's chest.
     expect(even.time).not.toBe(null);
-    expect(even.time).toBeGreaterThan(free.time + 0.15);
-    expect(even.time).toBeLessThan(free.time + 0.8);
+    expect(even.time).toBeGreaterThan(free.time + 0.4);
+    expect(even.time).toBeLessThan(free.time + 1.0);
     expect(even.rep.wr.pos.z).toBeLessThan(even.rep.db.pos.z - 1);
+    // It is a fight, not a brush: hands on him for most of a second, and bodies together.
+    expect(even.handsOn).toBeGreaterThan(0.5);
+    expect(even.touching).toBeGreaterThan(0.15);
+  });
+
+  it('the jam lands with a punch: it takes a bite out of his speed and rocks him', () => {
+    const even = release();
+    expect(even.events.has('punch')).toBe(true);
+    expect(even.lowBalance).toBeLessThan(0.97);
+    expect(even.stumbles).toBe(0); // an even punch rocks him, no more
+    // The instant it lands, at arm's length with the receiver coming at him.
+    const rep = pair();
+    rep.phase = 'live';
+    Object.assign(rep.wr.pos, { x: 0, z: 0 });
+    Object.assign(rep.db.pos, { x: 0, z: -1 });
+    rep.db.facing = 0;
+    rep.wr.vel.z = -4;
+    rep.wr.want.z = -8;
+    rep.handFight(SIM_DT);
+    expect(rep.events.some((e) => e.type === 'punch')).toBe(true);
+    expect(-rep.wr.vel.z).toBeLessThan(4 - HANDS.punch * 0.8);
+    expect(-rep.wr.vel.z).toBeGreaterThan(0); // stood up, not sent backwards
+    expect(rep.wr.balance).toBeLessThan(1);
+    // It only lands once.
+    rep.events.length = 0;
+    rep.handFight(SIM_DT);
+    expect(rep.events.some((e) => e.type === 'punch')).toBe(false);
+    // A much stronger corner's punch knocks a weak receiver off his stride.
+    const bullied = release({ wrStrength: 40, dbStrength: 95 });
+    expect(bullied.stumbles).toBeGreaterThan(0);
+    expect(bullied.rep.wr.down).toBe(false);
+  });
+
+  it('once the jam is shed it is beaten: no second one until there is daylight between them', () => {
+    const weak = release({ wrStrength: 40, dbStrength: 95 });
+    expect(weak.events.has('shed')).toBe(true);
+    expect(weak.punches).toBe(1);
+    expect(weak.time).not.toBe(null);
+    // Daylight gives the corner his jam back.
+    const rep = weak.rep;
+    rep.fight.spent = true;
+    rep.db.pos.x = rep.wr.pos.x + HANDS.show + 1;
+    rep.handFight(SIM_DT);
+    expect(rep.fight.spent).toBe(false);
   });
 
   it('strength decides the hand fight, both ways', () => {
@@ -364,6 +418,10 @@ describe('hands at the line', () => {
     expect(weakDb.time).toBeLessThan(even.time - 0.08);
     // The mismatch is not a wall: even the weakest receiver gets off the line.
     expect(release({ wrStrength: 40, dbStrength: 95 }).time).toBeLessThan(3.2);
+    // The stronger receiver drives into the hands; the weaker one is stood up by them.
+    expect(strongWr.touching).toBeGreaterThan(0.1);
+    expect(strongWr.handsOn).toBeLessThan(even.handsOn);
+    expect(weakWr.handsOn).toBeGreaterThan(even.handsOn);
   });
 
   it('a stronger receiver moves the corner off his spot, and is slowed less himself', () => {
@@ -425,6 +483,26 @@ describe('hands at the line', () => {
     expect(rep.wr.held).toBe(0);
   });
 
+  it('a sidestep gets him out of the hands sooner', () => {
+    const shedAt = (juke) => {
+      const rep = new Rep({
+        wr: { ratings: uniformRatings(65), controller: new Straight() },
+        db: { ratings: uniformRatings(65), controller: new Squat() },
+        rng: new RNG(5),
+        side: 1,
+      });
+      for (let i = 0; i < ticks(4); i++) {
+        rep.wrCtl.intent.juke = juke && rep.fight.on && rep.fight.time > 0.15 ? 1 : 0;
+        rep.step(SIM_DT);
+        if (rep.events.some((e) => e.type === 'shed')) return rep.t;
+        if (rep.fight.time === 0 && rep.t > 0.6 && !rep.fight.on) return rep.t; // out of them without a shed
+        rep.events.length = 0;
+      }
+      return null;
+    };
+    expect(shedAt(true)).toBeLessThan(shedAt(false) - 0.2);
+  });
+
   it('gravity is gravity', () => {
     // Hang time of a jump follows from its height: nobody floats.
     const a = athlete();
@@ -436,5 +514,288 @@ describe('hands at the line', () => {
     }
     const expected = 2 * Math.sqrt((2 * a.params.jumpHeight) / GRAVITY);
     expect(Math.abs(air - expected)).toBeLessThan(0.03);
+  });
+});
+
+// A receiver who just runs, and a corner who chases him down from behind.
+class Run {
+  constructor(jukeAt = null) {
+    this.intent = blankIntent();
+    this.jukeAt = jukeAt;
+  }
+  update(rep) {
+    this.intent.z = -1;
+    this.intent.sprint = true;
+    this.intent.juke = this.jukeAt !== null && rep.t >= this.jukeAt ? 1 : 0;
+    if (this.intent.juke) this.jukeAt = null;
+    return this.intent;
+  }
+}
+class Chase {
+  constructor() {
+    this.intent = blankIntent();
+  }
+  update(rep) {
+    const dx = rep.wr.pos.x - rep.db.pos.x;
+    const dz = rep.wr.pos.z - rep.db.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    this.intent.x = dx / d;
+    this.intent.z = dz / d;
+    this.intent.sprint = true;
+    return this.intent;
+  }
+}
+
+/**
+ * The receiver is already running down the field at `speed` and the corner
+ * starts `gap` yards behind him. `dbSpeed` is the corner's speed rating.
+ */
+function chase({ gap = 2.5, dbSpeed = 65, seconds = 3, speed = 7, jukeAt = null } = {}) {
+  const rep = new Rep({
+    wr: { ratings: uniformRatings(65), controller: new Run(jukeAt) },
+    db: { ratings: { ...uniformRatings(65), speed: dbSpeed }, controller: new Chase() },
+    rng: new RNG(5),
+    side: 1,
+  });
+  rep.snap();
+  Object.assign(rep.wr.pos, { x: 11, z: -6 });
+  Object.assign(rep.db.pos, { x: 11, z: -6 + gap });
+  rep.wr.vel.z = -speed;
+  rep.db.vel.z = -speed;
+  const out = { rep, hit: null, shed: null, kinds: new Set(), wrKinds: new Set(), events: [] };
+  Object.assign(out, { ridden: 0, together: 0, slowest: 99, dbSlowest: 99, dbFastest: 0, wrFastest: 0, gapAfterHit: 0 });
+  for (let i = 0; i < ticks(seconds); i++) {
+    rep.step(SIM_DT);
+    for (const e of rep.events) {
+      out.events.push(e);
+      if (e.type === 'shed' && out.shed === null) out.shed = rep.t;
+    }
+    rep.events.length = 0;
+    const d = Math.hypot(rep.db.pos.x - rep.wr.pos.x, rep.db.pos.z - rep.wr.pos.z);
+    if (rep.touching && out.hit === null) out.hit = rep.t;
+    if (rep.db.hands) out.kinds.add(rep.db.hands.kind);
+    if (rep.wr.hands) out.wrKinds.add(rep.wr.hands.kind);
+    out.wrFastest = Math.max(out.wrFastest, rep.wr.speed);
+    out.dbFastest = Math.max(out.dbFastest, rep.db.speed);
+    if (out.hit !== null && out.shed === null) {
+      out.dbSlowest = Math.min(out.dbSlowest, rep.db.speed);
+      out.gapAfterHit = Math.max(out.gapAfterHit, d);
+      if (d < HANDS.reach) out.together += SIM_DT;
+    }
+    if (rep.wr.held > 0) {
+      out.ridden += SIM_DT;
+      out.slowest = Math.min(out.slowest, rep.wr.speed);
+    }
+  }
+  out.depth = -rep.wr.pos.z;
+  return out;
+}
+
+describe('contact costs speed', () => {
+  it('a receiver who glances off a defender comes away slower, never faster', () => {
+    const rep = pair();
+    rep.phase = 'live';
+    Object.assign(rep.wr.pos, { x: 0, z: 0 });
+    Object.assign(rep.db.pos, { x: 0.5, z: -0.65 }); // half a body across his path
+    rep.wr.vel.z = -8;
+    const contact = rep.collide();
+    expect(contact).not.toBe(null);
+    expect(rep.wr.speed).toBeLessThan(7.5);
+    expect(rep.wr.speed).toBeGreaterThan(4); // he slides off him: he does not stop on his chest
+    expect(rep.wr.vel.x).toBeLessThan(-1); // ...past the shoulder he was already outside of
+    // Leaning on him after that does not build speed out of nothing either.
+    for (let i = 0; i < 40; i++) {
+      const before = rep.wr.speed;
+      rep.collide();
+      expect(rep.wr.speed).toBeLessThanOrEqual(before + 1e-9);
+    }
+  });
+
+  it('what a man loses is the speed between them, not the speed they share', () => {
+    // Running the same way, the corner a touch faster and right on his back.
+    const rep = pair();
+    rep.phase = 'live';
+    Object.assign(rep.wr.pos, { x: 0, z: -10 });
+    Object.assign(rep.db.pos, { x: 0, z: -9.2 });
+    rep.wr.vel.z = -8;
+    rep.db.vel.z = -9;
+    const contact = rep.collide();
+    expect(contact.closing).toBeCloseTo(1, 5);
+    // He slows to the receiver's pace. He used to lose most of his nine yards a second.
+    expect(-rep.db.vel.z).toBeGreaterThan(7.9);
+    expect(-rep.db.vel.z).toBeLessThan(9);
+    expect(-rep.wr.vel.z).toBeCloseTo(8, 5); // and the receiver is not shoved along
+    // Head on, each still loses most of what he brought.
+    const meet = pair();
+    meet.phase = 'live';
+    Object.assign(meet.wr.pos, { x: 0, z: 0 });
+    Object.assign(meet.db.pos, { x: 0, z: -0.8 });
+    meet.wr.vel.z = -6;
+    meet.db.vel.z = 4;
+    meet.collide();
+    expect(-meet.wr.vel.z).toBeLessThan(6 * 0.5);
+    expect(meet.db.vel.z).toBeLessThan(4 * 0.5);
+  });
+
+  it('nobody comes out of the hands or off a body faster than his own legs carry him', () => {
+    let worst = 0;
+    let fights = 0;
+    for (const [wrRating, dbRating] of [
+      [65, 65],
+      [85, 55],
+      [55, 85],
+    ]) {
+      for (let seed = 0; seed < 60; seed++) {
+        const rng = new RNG(7000 + seed);
+        const rep = new Rep({
+          wr: { ratings: uniformRatings(wrRating), controller: new ReceiverAI({ rng, tier: 5 }) },
+          db: { ratings: uniformRatings(dbRating), controller: new DefenderAI({ rng }) },
+          rng,
+          side: seed % 2 ? 1 : -1,
+        });
+        const sinceJuke = { wr: 9, db: 9 };
+        let fought = false;
+        for (let i = 0; i < ticks(20) && !rep.result; i++) {
+          rep.step(SIM_DT);
+          rep.events.length = 0;
+          if (rep.phase !== 'live') continue;
+          const d = Math.hypot(rep.db.pos.x - rep.wr.pos.x, rep.db.pos.z - rep.wr.pos.z);
+          for (const who of ['wr', 'db']) {
+            const a = rep[who];
+            // A juke is a burst of his own; it is the only thing here that tops his sprint.
+            sinceJuke[who] = a.jukeLock > 0 ? 0 : sinceJuke[who] + SIM_DT;
+            if (d < HANDS.show && sinceJuke[who] > 0.8) worst = Math.max(worst, a.speed / a.params.topSpeed);
+          }
+          if (rep.fight.on) fought = true;
+        }
+        if (fought) fights += 1;
+      }
+    }
+    expect(fights).toBeGreaterThan(60); // plenty of hand fights in there
+    expect(worst).toBeLessThanOrEqual(1.0001);
+  });
+});
+
+describe('riding a receiver', () => {
+  it('a corner who runs into the back of a receiver stays on him instead of bouncing off', () => {
+    const free = chase({ gap: 30 });
+    const ride = chase({ dbSpeed: 85 });
+    expect(ride.hit).not.toBe(null);
+    // From the hit until the hands are shed he never loses him, and he never stops dead.
+    expect(ride.shed).toBeGreaterThan(ride.hit + 0.6);
+    expect(ride.gapAfterHit).toBeLessThan(HANDS.full);
+    expect(ride.together).toBeGreaterThan(0.6);
+    expect(ride.dbSlowest).toBeGreaterThan(ride.rep.wr.params.topSpeed * 0.6);
+    // Hands on his hip and his back, and the receiver feels every bit of it.
+    expect(ride.kinds.has('ride')).toBe(true);
+    expect(ride.wrKinds.has('ridden')).toBe(true);
+    expect(ride.events.some((e) => e.type === 'hands' && e.kind === 'ride')).toBe(true);
+    expect(ride.slowest).toBeLessThan(ride.rep.wr.params.topSpeed * 0.8);
+    expect(ride.depth).toBeLessThan(free.depth - 1.5);
+    // Nobody got a tow or a shove out of it.
+    expect(ride.wrFastest).toBeLessThanOrEqual(ride.rep.wr.params.topSpeed + 1e-6);
+    expect(ride.dbFastest).toBeLessThanOrEqual(ride.rep.db.params.topSpeed + 1e-6);
+  });
+
+  it('he has to get his body on him: hands that are only reaching do nothing', () => {
+    // Same speed, a yard behind: within arm's reach all the way, and never touching.
+    const free = chase({ gap: 30 });
+    const close = chase({ gap: 1.0 });
+    expect(close.hit).toBe(null);
+    expect(close.kinds.has('ride')).toBe(true); // the arms are up
+    expect(close.ridden).toBe(0);
+    expect(close.depth).toBeCloseTo(free.depth, 3);
+  });
+
+  it('the hold is strength against strength, and it works anywhere on the field', () => {
+    const ridden = (wrStrength, dbStrength) => {
+      const rep = pair({ ...uniformRatings(65), strength: wrStrength }, { ...uniformRatings(65), strength: dbStrength });
+      rep.phase = 'live';
+      Object.assign(rep.wr.pos, { x: 0, z: -20 }); // well past the jam zone
+      Object.assign(rep.db.pos, { x: 0, z: -19.14 }); // on his back
+      rep.db.facing = Math.PI; // chasing him
+      rep.wr.vel.z = -7;
+      rep.wr.want.z = -8;
+      rep.db.vel.z = -7;
+      rep.touching = true; // he has run into him
+      rep.handFight(SIM_DT);
+      return rep;
+    };
+    const even = ridden(65, 65);
+    expect(even.fight.mode).toBe('ride');
+    expect(even.wr.held).toBeGreaterThan(0.6);
+    expect(ridden(40, 95).wr.held).toBeGreaterThan(even.wr.held);
+    expect(ridden(95, 40).wr.held).toBeLessThan(even.wr.held * 0.6);
+    // Being held takes top speed as well as footwork.
+    const run = { ...idle, z: -1, sprint: true };
+    const loose = athlete();
+    const held = athlete();
+    for (let i = 0; i < ticks(2); i++) {
+      held.held = even.wr.held;
+      loose.step(run, SIM_DT);
+      held.step(run, SIM_DT);
+    }
+    expect(held.speed).toBeLessThan(loose.speed * 0.85);
+    expect(held.speed).toBeGreaterThan(loose.speed * 0.6);
+    // What he is trying to do has not changed: that is what the quarterback reads.
+    expect(Math.hypot(held.want.x, held.want.z)).toBeCloseTo(loose.speed, 3);
+  });
+
+  it('when the receiver pulls away the corner hangs on, and it drags at the receiver', () => {
+    const rep = pair();
+    rep.phase = 'live';
+    Object.assign(rep.wr.pos, { x: 0, z: -20 });
+    Object.assign(rep.db.pos, { x: 0, z: -19.1 });
+    rep.db.facing = Math.PI;
+    rep.wr.vel.z = -8;
+    rep.wr.want.z = -8;
+    rep.db.vel.z = -6;
+    rep.touching = true;
+    rep.handFight(SIM_DT);
+    expect(-rep.wr.vel.z).toBeLessThan(8);
+    expect(-rep.db.vel.z).toBeGreaterThan(6);
+    expect(-rep.db.vel.z).toBeLessThan(-rep.wr.vel.z); // towed, not slung past him
+  });
+
+  it('the receiver sheds it in time, a juke sheds it sooner, and then the corner has to hit him again', () => {
+    const ride = chase({ dbSpeed: 85 });
+    expect(ride.events.some((e) => e.type === 'shed')).toBe(true);
+    const shaken = chase({ dbSpeed: 85, jukeAt: ride.hit + 0.25 });
+    expect(shaken.shed).toBeLessThan(ride.shed - 0.2);
+    // Right after the shed the hands are off, and stay off until he gets his body on him again.
+    const rep = pair();
+    rep.phase = 'live';
+    Object.assign(rep.wr.pos, { x: 0, z: -20 });
+    Object.assign(rep.db.pos, { x: 0, z: -19.0 });
+    rep.db.facing = Math.PI;
+    rep.wr.vel.z = -8;
+    rep.wr.want.z = -8;
+    rep.db.vel.z = -8;
+    rep.touching = true;
+    rep.handFight(SIM_DT);
+    expect(rep.wr.held).toBeGreaterThan(0);
+    rep.fight.time = 99; // long enough for anybody
+    rep.handFight(SIM_DT);
+    expect(rep.fight.rest).toBeGreaterThan(0);
+    rep.touching = false;
+    for (let i = 0; i < ticks(HANDS.rest + 0.2); i++) rep.handFight(SIM_DT);
+    expect(rep.fight.rest).toBe(0);
+    expect(rep.wr.held).toBe(0); // still within reach, but he has not hit him again
+    rep.touching = true;
+    rep.handFight(SIM_DT);
+    expect(rep.wr.held).toBeGreaterThan(0);
+  });
+
+  it('the jam turns into a ride as the receiver gets past, and the hands come off for the ball', () => {
+    const even = release();
+    expect(even.dbHands.has('jam')).toBe(true);
+    expect(even.dbHands.has('ride')).toBe(true);
+    const ride = chase({ dbSpeed: 85, seconds: 2.2 });
+    expect(ride.rep.wr.held).toBeGreaterThan(0);
+    ride.rep.phase = 'flight';
+    ride.rep.handFight(SIM_DT);
+    expect(ride.rep.wr.held).toBe(0);
+    expect(ride.rep.db.hands).toBe(null);
+    expect(ride.rep.fight.mode).toBe(null);
   });
 });
