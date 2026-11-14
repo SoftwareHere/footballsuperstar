@@ -256,8 +256,8 @@ export class Animator {
       if (hands.kind !== 'release') crouch += 0.07 * handK;
     }
     // Catching his balance: bent over it, low.
-    leanT += 0.3 * stumble;
-    crouch += 0.08 * stumble + 0.14 * clamp(s.landing || 0, 0, 1);
+    leanT += 0.36 * stumble;
+    crouch += 0.1 * stumble + 0.14 * clamp(s.landing || 0, 0, 1);
     if (s.throwing !== null && s.throwing !== undefined) leanT = s.throwing < 1 ? -0.1 : 0.22;
     if (loading) leanT = 0.32 * Math.sin(Math.PI * Math.min(1, load * 1.3)); // hinges over as the legs load
     if (air) {
@@ -270,12 +270,12 @@ export class Animator {
     this.wasAir = !grounded;
     // Knocked off his stride: his trunk goes the way he was hit before his feet catch up.
     if (stumble > this.wasStumble + 0.3 && s.shove) {
-      this.lean.v += 3.2 * (s.shove.x * sinF + s.shove.z * cosF);
-      this.bank.v -= 3.2 * (s.shove.x * cosF - s.shove.z * sinF);
-      this.drop.v -= 0.8;
+      this.lean.v += 4.5 * (s.shove.x * sinF + s.shove.z * cosF);
+      this.bank.v -= 5 * (s.shove.x * cosF - s.shove.z * sinF);
+      this.drop.v -= 1.2;
     }
     this.wasStumble = stumble;
-    let bankT = -0.018 * aL * (0.4 + 0.6 * amp) + 0.15 * stumble * Math.sin(this.time * 15);
+    let bankT = -0.018 * aL * (0.4 + 0.6 * amp) + 0.2 * stumble * Math.sin(this.time * 15);
     if (hands && hands.kind === 'release') {
       // Dips the shoulder nearer the man and slides by.
       const foeLeft = (s.foe.chest.x - s.x) * cosF - (s.foe.chest.z - s.z) * sinF;

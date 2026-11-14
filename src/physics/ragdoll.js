@@ -32,8 +32,8 @@ INV_MASS[P.HIP_L] = INV_MASS[P.HIP_R] = 1 / 9;
 INV_MASS[P.KN_L] = INV_MASS[P.KN_R] = 1 / 5;
 INV_MASS[P.FT_L] = INV_MASS[P.FT_R] = 1 / 2.6;
 
-// How much of a shove each particle takes when the hit is high or low.
-const UPPER = [P.HEAD, P.NECK, P.CHEST, P.SH_L, P.SH_R, P.EL_L, P.EL_R, P.HA_L, P.HA_R];
+const HEIGHT = BODY.hipHeight + BODY.spine + BODY.neck; // feet to the centre of his head, standing
+const TRUNK_AT = 0.7; // how far up him the middle of his trunk is
 
 const EQUAL = 0;
 const MIN = 1;
@@ -110,14 +110,15 @@ const BONES = CONSTRAINTS.filter((c) => c.kind === EQUAL && c.stiffness === 1);
  */
 function buildTone() {
   const out = [];
-  const add = (a, b, length, k, c) => out.push({ a, b, length, k, c });
+  // `leg` marks the joints he stands on: those give way first when he goes over.
+  const add = (a, b, length, k, c, leg = false) => out.push({ a, b, length, k, c, leg });
   for (const [SH, EL, HA, HIP, KN, FT] of [
     [P.SH_L, P.EL_L, P.HA_L, P.HIP_L, P.KN_L, P.FT_L],
     [P.SH_R, P.EL_R, P.HA_R, P.HIP_R, P.KN_R, P.FT_R],
   ]) {
-    add(HIP, FT, bent(BODY.thigh, BODY.shin, 158), 0.05, 0.3); // knee
+    add(HIP, FT, bent(BODY.thigh, BODY.shin, 158), 0.05, 0.3, true); // knee
     add(SH, HA, bent(BODY.upperArm, BODY.forearm, 145), 0.03, 0.25); // elbow
-    add(SH, KN, restLength(SH, KN) - 0.03, 0.05, 0.3); // hip: thigh in line with the trunk
+    add(SH, KN, restLength(SH, KN) - 0.03, 0.05, 0.3, true); // hip: thigh in line with the trunk
     add(EL, HIP, restLength(EL, HIP) + 0.1, 0.008, 0.15); // shoulder: arms come to rest near his sides
     add(P.HEAD, SH, restLength(P.HEAD, SH), 0.08, 0.3); // neck
   }
@@ -144,6 +145,7 @@ export class Ragdoll {
     this.energy = 0;
     this.impact = 0; // hardest ground hit this update, yd/s
     this.tone = 1; // how hard his joints resist being folded: 0 limp, 1 a braced athlete
+    this.legTone = 1; // the same for his knees and hips alone: low while his legs are going from under him
     // His own muscles moving him: where each particle should be, and how firmly
     // it is taken there (0 = not at all, 1 = exactly, every sub-step).
     this.goal = new Float64Array(N * 3);
@@ -183,17 +185,63 @@ export class Ragdoll {
     if (this.drive > 0) this.goal.set(goal);
   }
 
-  /** Shove the whole body. `high` hits the chest and shoulders, otherwise the legs. */
+  /**
+   * Shove the body: (vx, vy, vz) is the change in speed his trunk takes.
+   * `high` is a hit on the chest and shoulders: his head takes more of it
+   * and his feet none, so a foot that is planted stays planted and he goes
+   * over it. Otherwise it is a hit on the legs, which are taken out from
+   * under him while his head barely moves.
+   */
   impulse(vx, vy, vz, high = true) {
+    const { pos, prev } = this;
+    const base = this.lowest();
     for (let i = 0; i < N; i++) {
-      const upper = UPPER.includes(i);
-      const w = high === upper ? 1.25 : 0.7;
       const k = i * 3;
-      this.prev[k] -= vx * w * STEP;
-      this.prev[k + 1] -= vy * STEP;
-      this.prev[k + 2] -= vz * w * STEP;
+      const h = Math.min(1, Math.max(0, (pos[k + 1] - base) / HEIGHT)); // 0 at his feet .. 1 at his head
+      const w = high ? h / TRUNK_AT : 1.6 - 0.86 * h;
+      prev[k] -= vx * w * STEP;
+      prev[k + 1] -= vy * STEP;
+      prev[k + 2] -= vz * w * STEP;
     }
     this.calm = 0;
+  }
+
+  /**
+   * Tip him over without moving him as a whole: the end that was hit goes
+   * the way of the hit (dx, dz) and the other end goes the opposite way.
+   * Hit high he goes over backward off his feet; hit low his legs are taken
+   * out from under him. `speed` is how fast head and feet part, yd/s.
+   */
+  topple(dx, dz, speed, high = true) {
+    const n = Math.hypot(dx, dz);
+    if (n < 1e-6 || speed <= 0) return;
+    const { pos, prev } = this;
+    const base = this.lowest();
+    // Balance the turning about his middle so that it adds no travel.
+    let mass = 0;
+    let moment = 0;
+    for (let i = 0; i < N; i++) {
+      const h = Math.min(1, Math.max(0, (pos[i * 3 + 1] - base) / HEIGHT));
+      mass += 1 / INV_MASS[i];
+      moment += h / INV_MASS[i];
+    }
+    const mid = moment / mass;
+    const sign = high ? 1 : -1;
+    for (let i = 0; i < N; i++) {
+      const k = i * 3;
+      const h = Math.min(1, Math.max(0, (pos[k + 1] - base) / HEIGHT));
+      const v = sign * (h - mid) * speed * STEP;
+      prev[k] -= (dx / n) * v;
+      prev[k + 2] -= (dz / n) * v;
+    }
+    this.calm = 0;
+  }
+
+  /** Height of his lowest part above the turf. */
+  lowest() {
+    let low = Infinity;
+    for (let i = 0; i < N; i++) low = Math.min(low, this.pos[i * 3 + 1]);
+    return low;
   }
 
   /**
@@ -264,7 +312,7 @@ export class Ragdoll {
         ((pos[b] - prev[b] - (pos[a] - prev[a])) * dx + (pos[b + 1] - prev[b + 1] - (pos[a + 1] - prev[a + 1])) * dy + (pos[b + 2] - prev[b + 2] - (pos[a + 2] - prev[a + 2])) * dz) / d;
       const wa = INV_MASS[t.a];
       const wb = INV_MASS[t.b];
-      const k = (((d - t.length) * t.k + rate * t.c) * tone) / d / (wa + wb);
+      const k = (((d - t.length) * t.k + rate * t.c) * tone * (t.leg ? this.legTone : 1)) / d / (wa + wb);
       pos[a] += dx * k * wa;
       pos[a + 1] += dy * k * wa;
       pos[a + 2] += dz * k * wa;

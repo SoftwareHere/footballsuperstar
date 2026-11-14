@@ -36,6 +36,9 @@ const FOOT_L = new THREE.Vector3();
 const FOOT_R = new THREE.Vector3();
 
 const BLEND = 0.2; // seconds to ease from the end of getting up into the animation
+const LEGS_GO = 0.15; // how much is left in his knees and hips at the moment he goes over
+const LEGS_BACK = 0.45; // seconds until they are braced again
+const TRUNK = [P.PELVIS, P.NECK, P.CHEST, P.SH_L, P.SH_R, P.HIP_L, P.HIP_R];
 const TURN = 6; // rad/s he turns to face the play once he is back on his feet
 
 /**
@@ -140,6 +143,7 @@ export class AthleteModel {
         up.stop();
         rag.moveTo(null, 0);
         rag.tone = 1;
+        rag.legTone = Math.min(1, rag.legTone + dt / LEGS_BACK);
         const lie = rag.lie(LIE);
         this.lieUp += (lie.up - this.lieUp) * Math.min(1, dt * 6);
         options.anchor = { x: s.x, z: s.z, strength: 0.045, along: standAlong(this.lieUp) };
@@ -230,16 +234,23 @@ export class AthleteModel {
     }
   }
 
+  /**
+   * Off his feet. Every part of him starts with the motion it had; then he
+   * is tipped over the way he was hit, and his legs go from under him.
+   */
   startRagdoll(s) {
     this.mode = 'ragdoll';
     this.blend = 0;
     this.yawBias = 0;
     this.getUp.stop();
     this.lieUp = 0;
-    this.ragdoll.tone = 1;
+    const rag = this.ragdoll;
     const vx = s.vx || 0;
     const vz = s.vz || 0;
     const usable = this.frames >= 2 && this.lastDt > 1e-5;
+    // How the body as a whole was travelling, by its trunk.
+    let mx = 0;
+    let mz = 0;
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const v = this.velocities[i];
       if (usable) {
@@ -253,9 +264,34 @@ export class AthleteModel {
         v[2] = vz;
       }
     }
-    this.ragdoll.start(this.points, this.velocities);
+    for (const i of TRUNK) {
+      mx += this.velocities[i][0] / TRUNK.length;
+      mz += this.velocities[i][2] / TRUNK.length;
+    }
+    rag.start(this.points, this.velocities);
+    rag.tone = 1;
+    rag.legTone = 1;
+    if (s.diving) return; // laid out already: he just lands
+    // What the hit did to how he is travelling: the game has already worked
+    // that out. His trunk takes it; a planted foot stays put, so he goes over.
     const f = s.fall;
-    if (f) this.ragdoll.impulse(f.vx * 0.7, Math.max(0, f.vy) * 0.6, f.vz * 0.7, f.high !== false);
+    const high = !f || f.high !== false;
+    const dvx = vx - mx;
+    const dvz = vz - mz;
+    rag.impulse(dvx, f && f.vy > 0 ? f.vy * 0.5 : 0, dvz, high);
+    if (Math.hypot(dvx, dvz) < 2) {
+      // Hardly a shove at all: he has simply lost his feet. He pitches the
+      // way he was pushed, or failing that the way he was going.
+      let dx = f ? f.vx : 0;
+      let dz = f ? f.vz : 0;
+      if (Math.hypot(dx, dz) < 0.5) {
+        const moving = Math.hypot(vx, vz) > 1;
+        dx = moving ? vx : Math.sin(s.facing);
+        dz = moving ? vz : Math.cos(s.facing);
+      }
+      rag.topple(dx, dz, 3, high);
+    }
+    rag.legTone = LEGS_GO; // and comes back as he hits the turf
   }
 
   /** A ball he is still holding stays in his hands while he is on the turf. */

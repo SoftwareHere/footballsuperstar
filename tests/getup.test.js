@@ -23,7 +23,7 @@ function knockdownAndGetUp(shove, vz = 7, high = true) {
   let z = 0;
   let vx = shove[0];
   let svz = vz * 0.45 + shove[2];
-  for (let t = 0; t < 1.6; t += 1 / FPS) {
+  for (let t = 0; t < 2.2; t += 1 / FPS) {
     const speed = Math.hypot(vx, svz);
     if (speed > 0) {
       const k = Math.max(0, speed - FALL.friction / FPS) / speed;
@@ -72,15 +72,17 @@ function knockdownAndGetUp(shove, vz = 7, high = true) {
   return { rag, getUp, frames, lying, spot: { x, z } };
 }
 
+// [shove, how fast he was running (toward +z, the way he faces), hit high or low]
 const FALLS = [
-  [[3, 2, 0], 7, true],
+  [[3, 2, 0], 7, true], // from the side, at a run
   [[-6, 1, 4], 7, true],
-  [[0, 5, -8], 7, true],
-  [[0, 1, -9], 7, true],
-  [[5, 1, 0], 0, false],
-  [[0, 2, 6], 8, false],
+  [[0, 5, -8], 7, true], // head on, at a run
+  [[0, 1, -5], 0, true], // head on, standing: flat on his back
+  [[1, 2, -6], 2, true],
+  [[5, 1, 0], 0, false], // legs taken out sideways
+  [[0, 2, 6], 8, false], // legs taken out from behind
   [[4, 3, 4], 3, true],
-  [[0, 0.5, 0], 0, true],
+  [[0, 0.5, 0], 0, true], // his legs just go
   [[-3, 4, -3], 9, false],
 ];
 const runs = FALLS.map((f) => knockdownAndGetUp(...f));
