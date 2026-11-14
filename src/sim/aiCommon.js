@@ -1,4 +1,4 @@
-import { GRAVITY, DIVE } from '../config.js';
+import { GRAVITY, DIVE, JUMP } from '../config.js';
 import { len2 } from '../core/vec.js';
 import { planBallPlay } from './catching.js';
 
@@ -56,7 +56,7 @@ export function playTheBall(out, me, ball, aim, jumpLeadScale, jumpRange = 1.7) 
     steer(out, me, (dx / d) * speed, (dz / d) * speed);
     out.sprint = true;
   }
-  if (me.airborne || me.down) return;
+  if (me.airborne || me.down || me.gather > 0) return;
   // Out of reach on his feet: dive, timed so he is laid out when it arrives.
   const plan = planBallPlay(me, ball, aim);
   if (plan.dive) {
@@ -64,8 +64,8 @@ export function playTheBall(out, me, ball, aim, jumpLeadScale, jumpRange = 1.7) 
     if (d <= DIVE.range && plan.t <= DIVE.minAir + 0.1 * jumpLeadScale) out.jump = true;
     return;
   }
-  // Jump so the peak of the jump meets the ball.
-  const tApex = Math.sqrt((2 * me.params.jumpHeight) / GRAVITY);
+  // Jump so the peak of the jump meets the ball: the legs have to load first.
+  const tApex = JUMP.load + Math.sqrt((2 * me.params.jumpHeight) / GRAVITY);
   if (eta <= tApex * jumpLeadScale) {
     const px = me.pos.x + me.vel.x * eta;
     const pz = me.pos.z + me.vel.z * eta;

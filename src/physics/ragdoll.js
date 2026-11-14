@@ -32,18 +32,24 @@ INV_MASS[P.HIP_L] = INV_MASS[P.HIP_R] = 1 / 9;
 INV_MASS[P.KN_L] = INV_MASS[P.KN_R] = 1 / 5;
 INV_MASS[P.FT_L] = INV_MASS[P.FT_R] = 1 / 2.6;
 
-// How much of a shove each particle takes when the hit is high or low.
-const UPPER = [P.HEAD, P.NECK, P.CHEST, P.SH_L, P.SH_R, P.EL_L, P.EL_R, P.HA_L, P.HA_R];
+const HEIGHT = BODY.hipHeight + BODY.spine + BODY.neck; // feet to the centre of his head, standing
+const TRUNK_AT = 0.7; // how far up him the middle of his trunk is
 
 const EQUAL = 0;
 const MIN = 1;
 const MAX = 2;
 
+const REST = restPoints();
+const restLength = (a, b) => Math.hypot(REST[a][0] - REST[b][0], REST[a][1] - REST[b][1], REST[a][2] - REST[b][2]);
+/** Distance between the two ends of a joint when it is bent to `degrees` (180 = straight). */
+const bent = (l1, l2, degrees) => Math.sqrt(l1 * l1 + l2 * l2 - 2 * l1 * l2 * Math.cos((degrees * Math.PI) / 180));
+
 function buildConstraints() {
-  const rest = restPoints();
-  const len = (a, b) => Math.hypot(rest[a][0] - rest[b][0], rest[a][1] - rest[b][1], rest[a][2] - rest[b][2]);
+  const len = restLength;
   const out = [];
-  const add = (a, b, kind = EQUAL, length = len(a, b), stiffness = 1) => out.push({ a, b, kind, length, stiffness });
+  // `driven` is the length used instead while his own muscles are moving him:
+  // a man getting up folds himself tighter than one who is merely lying there.
+  const add = (a, b, kind = EQUAL, length = len(a, b), stiffness = 1, driven = length) => out.push({ a, b, kind, length, stiffness, driven });
 
   // The torso: a braced box that keeps its shape.
   const torso = [P.NECK, P.CHEST, P.PELVIS, P.SH_L, P.SH_R, P.HIP_L, P.HIP_R];
@@ -68,16 +74,18 @@ function buildConstraints() {
     add(KN, FT);
     // Elbows and knees: never locked dead straight, never folded flat.
     add(SH, HA, MAX, ARM_LENGTH * 0.985);
-    add(SH, HA, MIN, ARM_LENGTH * 0.3);
+    add(SH, HA, MIN, bent(BODY.upperArm, BODY.forearm, 40));
     add(HIP, FT, MAX, LEG_LENGTH * 0.985);
-    add(HIP, FT, MIN, LEG_LENGTH * 0.42);
+    add(HIP, FT, MIN, bent(BODY.thigh, BODY.shin, 62), 1, bent(BODY.thigh, BODY.shin, 48));
+    // Hips: the thigh does not fold up onto the chest, or swing back past the spine.
+    add(KN, P.NECK, MIN, 0.64, 1, 0.4);
+    add(KN, P.CHEST, MIN, 0.42, 1, 0.26);
+    add(KN, P.CHEST, MAX, len(KN, P.CHEST) + 0.035);
     // Limbs stay outside the torso.
     add(EL, P.CHEST, MIN, 0.2);
     add(HA, P.CHEST, MIN, 0.17);
     add(HA, P.PELVIS, MIN, 0.2);
     add(HA, P.NECK, MIN, 0.2);
-    add(KN, P.CHEST, MIN, 0.36);
-    add(KN, P.NECK, MIN, 0.5);
     add(FT, P.PELVIS, MIN, 0.3);
     // Legs do not pass through each other, or do the splits.
     add(KN, otherKN, MIN, 0.15, 0.5);
@@ -89,6 +97,37 @@ function buildConstraints() {
 }
 
 const CONSTRAINTS = buildConstraints();
+// The bones themselves: solved once more at the end so nothing else stretches them.
+const BONES = CONSTRAINTS.filter((c) => c.kind === EQUAL && c.stiffness === 1);
+
+/**
+ * Muscle tone. A body that has been knocked over is not a sack of parts: every
+ * joint resists being folded and springs back toward a relaxed, slightly bent
+ * shape, and resists moving fast. Each entry is a soft spring and damper
+ * between the two ends of a joint: { a, b, length, k (spring), c (damper) }.
+ * They are far weaker than the bones, so a hard hit still folds him up; he
+ * just does not stay crumpled.
+ */
+function buildTone() {
+  const out = [];
+  // `leg` marks the joints he stands on: those give way first when he goes over.
+  const add = (a, b, length, k, c, leg = false) => out.push({ a, b, length, k, c, leg });
+  for (const [SH, EL, HA, HIP, KN, FT] of [
+    [P.SH_L, P.EL_L, P.HA_L, P.HIP_L, P.KN_L, P.FT_L],
+    [P.SH_R, P.EL_R, P.HA_R, P.HIP_R, P.KN_R, P.FT_R],
+  ]) {
+    add(HIP, FT, bent(BODY.thigh, BODY.shin, 158), 0.05, 0.3, true); // knee
+    add(SH, HA, bent(BODY.upperArm, BODY.forearm, 145), 0.03, 0.25); // elbow
+    add(SH, KN, restLength(SH, KN) - 0.03, 0.05, 0.3, true); // hip: thigh in line with the trunk
+    add(EL, HIP, restLength(EL, HIP) + 0.1, 0.008, 0.15); // shoulder: arms come to rest near his sides
+    add(P.HEAD, SH, restLength(P.HEAD, SH), 0.08, 0.3); // neck
+  }
+  add(P.KN_L, P.KN_R, 0.3, 0.02, 0.2); // legs neither clamped together nor splayed
+  add(P.FT_L, P.FT_R, 0.36, 0.012, 0.15);
+  return out;
+}
+
+const TONE = buildTone();
 
 /**
  * A football player as a rag doll: 16 particles held together by distance
@@ -105,6 +144,12 @@ export class Ragdoll {
     this.calm = 0; // seconds it has been nearly still
     this.energy = 0;
     this.impact = 0; // hardest ground hit this update, yd/s
+    this.tone = 1; // how hard his joints resist being folded: 0 limp, 1 a braced athlete
+    this.legTone = 1; // the same for his knees and hips alone: low while his legs are going from under him
+    // His own muscles moving him: where each particle should be, and how firmly
+    // it is taken there (0 = not at all, 1 = exactly, every sub-step).
+    this.goal = new Float64Array(N * 3);
+    this.drive = 0;
   }
 
   /**
@@ -124,21 +169,79 @@ export class Ragdoll {
     this.acc = 0;
     this.calm = 0;
     this.active = true;
+    this.drive = 0;
     // Whatever pose he was in, the bones are the lengths they are.
     for (let i = 0; i < 4; i++) this.solve(true);
   }
 
-  /** Shove the whole body. `high` hits the chest and shoulders, otherwise the legs. */
+  /**
+   * Move him by his own muscles: every particle is taken toward `goal`
+   * (N * 3 world coordinates). `drive` runs from 0 (limp) to 1 (exactly
+   * there); in between he is pulled there softly, still falling, sliding
+   * and resting on the turf as he goes. Pass 0 to let go again.
+   */
+  moveTo(goal, drive) {
+    this.drive = Math.min(1, Math.max(0, drive));
+    if (this.drive > 0) this.goal.set(goal);
+  }
+
+  /**
+   * Shove the body: (vx, vy, vz) is the change in speed his trunk takes.
+   * `high` is a hit on the chest and shoulders: his head takes more of it
+   * and his feet none, so a foot that is planted stays planted and he goes
+   * over it. Otherwise it is a hit on the legs, which are taken out from
+   * under him while his head barely moves.
+   */
   impulse(vx, vy, vz, high = true) {
+    const { pos, prev } = this;
+    const base = this.lowest();
     for (let i = 0; i < N; i++) {
-      const upper = UPPER.includes(i);
-      const w = high === upper ? 1.25 : 0.7;
       const k = i * 3;
-      this.prev[k] -= vx * w * STEP;
-      this.prev[k + 1] -= vy * STEP;
-      this.prev[k + 2] -= vz * w * STEP;
+      const h = Math.min(1, Math.max(0, (pos[k + 1] - base) / HEIGHT)); // 0 at his feet .. 1 at his head
+      const w = high ? h / TRUNK_AT : 1.6 - 0.86 * h;
+      prev[k] -= vx * w * STEP;
+      prev[k + 1] -= vy * STEP;
+      prev[k + 2] -= vz * w * STEP;
     }
     this.calm = 0;
+  }
+
+  /**
+   * Tip him over without moving him as a whole: the end that was hit goes
+   * the way of the hit (dx, dz) and the other end goes the opposite way.
+   * Hit high he goes over backward off his feet; hit low his legs are taken
+   * out from under him. `speed` is how fast head and feet part, yd/s.
+   */
+  topple(dx, dz, speed, high = true) {
+    const n = Math.hypot(dx, dz);
+    if (n < 1e-6 || speed <= 0) return;
+    const { pos, prev } = this;
+    const base = this.lowest();
+    // Balance the turning about his middle so that it adds no travel.
+    let mass = 0;
+    let moment = 0;
+    for (let i = 0; i < N; i++) {
+      const h = Math.min(1, Math.max(0, (pos[i * 3 + 1] - base) / HEIGHT));
+      mass += 1 / INV_MASS[i];
+      moment += h / INV_MASS[i];
+    }
+    const mid = moment / mass;
+    const sign = high ? 1 : -1;
+    for (let i = 0; i < N; i++) {
+      const k = i * 3;
+      const h = Math.min(1, Math.max(0, (pos[k + 1] - base) / HEIGHT));
+      const v = sign * (h - mid) * speed * STEP;
+      prev[k] -= (dx / n) * v;
+      prev[k + 2] -= (dz / n) * v;
+    }
+    this.calm = 0;
+  }
+
+  /** Height of his lowest part above the turf. */
+  lowest() {
+    let low = Infinity;
+    for (let i = 0; i < N; i++) low = Math.min(low, this.pos[i * 3 + 1]);
+    return low;
   }
 
   /**
@@ -176,11 +279,15 @@ export class Ragdoll {
     }
     this.energy = energy / (STEP * STEP) / N; // mean squared speed
 
+    if (this.tone > 0) this.muscle();
+    if (this.drive > 0) this.follow();
     for (let it = 0; it < ITERATIONS; it++) {
       this.solve(false);
       this.knees();
       this.ground();
     }
+    this.solve(false, BONES);
+    this.ground();
     this.contact();
     if (obstacles) for (const o of obstacles) this.avoid(o);
     if (anchor) this.dragTo(anchor);
@@ -189,17 +296,58 @@ export class Ragdoll {
     else this.calm = 0;
   }
 
-  solve(rigid) {
+  /** Joint stiffness: a spring toward the relaxed shape, and a damper on how fast a joint moves. */
+  muscle() {
+    const { pos, prev, tone } = this;
+    for (const t of TONE) {
+      const a = t.a * 3;
+      const b = t.b * 3;
+      const dx = pos[b] - pos[a];
+      const dy = pos[b + 1] - pos[a + 1];
+      const dz = pos[b + 2] - pos[a + 2];
+      const d = Math.hypot(dx, dy, dz);
+      if (d < 1e-9) continue;
+      // How fast the two ends are closing or opening, per sub-step.
+      const rate =
+        ((pos[b] - prev[b] - (pos[a] - prev[a])) * dx + (pos[b + 1] - prev[b + 1] - (pos[a + 1] - prev[a + 1])) * dy + (pos[b + 2] - prev[b + 2] - (pos[a + 2] - prev[a + 2])) * dz) / d;
+      const wa = INV_MASS[t.a];
+      const wb = INV_MASS[t.b];
+      const k = (((d - t.length) * t.k + rate * t.c) * tone * (t.leg ? this.legTone : 1)) / d / (wa + wb);
+      pos[a] += dx * k * wa;
+      pos[a + 1] += dy * k * wa;
+      pos[a + 2] += dz * k * wa;
+      pos[b] -= dx * k * wb;
+      pos[b + 1] -= dy * k * wb;
+      pos[b + 2] -= dz * k * wb;
+    }
+  }
+
+  /** Take every particle toward its goal, losing the motion it had as the muscles take over. */
+  follow() {
+    const { pos, prev, goal, drive } = this;
+    const keep = 1 - drive;
+    for (let k = 0; k < N * 3; k++) {
+      const move = (goal[k] - pos[k]) * drive;
+      const v = (pos[k] - prev[k]) * keep;
+      pos[k] += move;
+      prev[k] = pos[k] - v;
+    }
+    this.calm = 0;
+  }
+
+  solve(rigid, constraints = CONSTRAINTS) {
     const { pos } = this;
-    for (const c of CONSTRAINTS) {
+    const driven = this.drive > 0.3;
+    for (const c of constraints) {
       const a = c.a * 3;
       const b = c.b * 3;
       const dx = pos[b] - pos[a];
       const dy = pos[b + 1] - pos[a + 1];
       const dz = pos[b + 2] - pos[a + 2];
       const d = Math.hypot(dx, dy, dz);
-      if (c.kind === MIN && d >= c.length) continue;
-      if (c.kind === MAX && d <= c.length) continue;
+      const length = driven ? c.driven : c.length;
+      if (c.kind === MIN && d >= length) continue;
+      if (c.kind === MAX && d <= length) continue;
       if (d < 1e-9) {
         // Two particles in the same spot: nudge them apart along y.
         pos[b + 1] += 1e-4;
@@ -207,7 +355,7 @@ export class Ragdoll {
       }
       const wa = INV_MASS[c.a];
       const wb = INV_MASS[c.b];
-      const k = ((d - c.length) / d / (wa + wb)) * (rigid ? 1 : c.stiffness);
+      const k = ((d - length) / d / (wa + wb)) * (rigid ? 1 : c.stiffness);
       pos[a] += dx * k * wa;
       pos[a + 1] += dy * k * wa;
       pos[a + 2] += dz * k * wa;
@@ -309,11 +457,46 @@ export class Ragdoll {
     }
   }
 
-  /** Slide the whole body toward the anchor without adding speed. */
-  dragTo({ x, z, strength = 0.05 }) {
+  /**
+   * How he is lying: `ax, az` is the direction along the turf from his hips
+   * to his head (zero length if he is upright), `flat` how much of his spine
+   * is along the turf (0 upright .. 1 lying), and `up` which way his chest
+   * faces (+1 at the sky, -1 into the turf).
+   */
+  lie(out = {}) {
+    const { pos } = this;
+    const p = P.PELVIS * 3;
+    const n = P.NECK * 3;
+    const sx = pos[n] - pos[p];
+    const sy = pos[n + 1] - pos[p + 1];
+    const sz = pos[n + 2] - pos[p + 2];
+    const spine = Math.hypot(sx, sy, sz) || 1;
+    const flat = Math.hypot(sx, sz);
+    out.ax = flat > 1e-6 ? sx / flat : 0;
+    out.az = flat > 1e-6 ? sz / flat : 0;
+    out.flat = flat / spine;
+    // Chest normal = (left shoulder - right shoulder) x spine.
+    const lx = pos[P.SH_L * 3] - pos[P.SH_R * 3];
+    const lz = pos[P.SH_L * 3 + 2] - pos[P.SH_R * 3 + 2];
+    const ly = pos[P.SH_L * 3 + 1] - pos[P.SH_R * 3 + 1];
+    const cx = ly * sz - lz * sy;
+    const cy = lz * sx - lx * sz;
+    const cz = lx * sy - ly * sx;
+    out.up = cy / (Math.hypot(cx, cy, cz) || 1);
+    return out;
+  }
+
+  /**
+   * Slide the whole body toward the anchor without adding speed. `along`
+   * says which part of him belongs on the anchor: that many yards from his
+   * hips toward his head (0.3 is the middle of his trunk).
+   */
+  dragTo({ x, z, strength = 0.05, along = 0.3 }) {
     const { pos, prev } = this;
-    const cx = (pos[P.PELVIS * 3] + pos[P.NECK * 3]) / 2;
-    const cz = (pos[P.PELVIS * 3 + 2] + pos[P.NECK * 3 + 2]) / 2;
+    const a = this.lie(LIE);
+    const reach = along * a.flat;
+    const cx = pos[P.PELVIS * 3] + a.ax * reach;
+    const cz = pos[P.PELVIS * 3 + 2] + a.az * reach;
     const mx = (x - cx) * strength;
     const mz = (z - cz) * strength;
     for (let i = 0; i < N; i++) {
@@ -339,4 +522,6 @@ export class Ragdoll {
   }
 }
 
-export { RADIUS as PARTICLE_RADIUS, CONSTRAINTS };
+const LIE = {};
+
+export { RADIUS as PARTICLE_RADIUS, CONSTRAINTS, TONE };

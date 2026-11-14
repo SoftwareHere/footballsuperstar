@@ -13,10 +13,10 @@ export const STAT_KEYS = [
 export const STAT_INFO = {
   speed: { label: 'Speed', blurb: 'Top speed. Run past him, or keep up with him.' },
   acceleration: { label: 'Acceleration', blurb: 'How fast you reach top speed off the line and out of breaks.' },
-  agility: { label: 'Agility', blurb: 'Sharper cuts and jukes on offense, tighter mirroring on defense.' },
+  agility: { label: 'Agility', blurb: 'Sharper cuts and jukes, tighter mirroring on defense, and better balance through contact.' },
   hands: { label: 'Hands', blurb: 'Secure catches in traffic. On defense: more breakups and picks.' },
   jumping: { label: 'Jumping', blurb: 'Higher reach on jump balls, both ways.' },
-  strength: { label: 'Strength', blurb: 'Win the contact: beat the jam, deliver the jam, win 50/50 balls.' },
+  strength: { label: 'Strength', blurb: 'Win the hand fight at the line, stay on your feet through a hit, win 50/50 balls.' },
   stamina: { label: 'Stamina', blurb: 'A bigger sprint tank that refills faster between reps.' },
 };
 
@@ -51,7 +51,9 @@ export function deriveParams(ratings) {
     reachBonus: 0.25 * h, // extra catch radius, yards
     intChance: 0.08 + 0.3 * h, // defender: chance a breakup becomes a pick
     jumpHeight: 0.45 + 0.65 * j, // yards
-    strength: 0.6 + 0.9 * st, // contact weight
+    strength: 0.6 + 0.9 * st, // contact weight: hands at the line, bodies at the catch
+    poise: 0.85 + 0.3 * g, // how big a hit his balance can take
+    balanceRecover: 1.4 - 0.6 * g, // seconds to get his balance all the way back
     sprintSeconds: 4.0 + 5.0 * sm, // length of a full sprint tank
     staminaRegen: 0.1 + 0.1 * sm, // tank fraction per second while not sprinting
     betweenReps: 0.5 + 0.35 * sm, // tank fraction recovered between reps

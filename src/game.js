@@ -1,4 +1,4 @@
-import { SIM_DT, REP, CAMERA_MODES, CONTACT } from './config.js';
+import { SIM_DT, REP, CAMERA_MODES } from './config.js';
 import { RNG } from './core/rng.js';
 import { Input } from './core/input.js';
 import { Match } from './sim/match.js';
@@ -281,10 +281,16 @@ export class Game {
       case 'contact':
         if (e.power > 3) this.sfx.play('bump');
         break;
+      case 'hands':
+        this.sfx.play('hands'); // pads and palms: the fight at the line
+        break;
+      case 'stumble':
+        this.sfx.play('stumble');
+        break;
       case 'hit':
         this.sfx.play('hit');
         this.view.rig.shake(Math.min(0.3, 0.05 + e.power * 0.03));
-        if (e.power >= CONTACT.knockdown) this.slowmo = 0.3;
+        if (e.down) this.slowmo = 0.3; // the hit that put him on the turf
         break;
       case 'fall':
         this.sfx.play('bodyfall');
