@@ -285,7 +285,7 @@ export class Game {
         this.sfx.play('hands'); // pads and palms: the fight at the line
         break;
       case 'punch':
-        // The jam landing on the chest plate. You feel your own.
+        // The jam landing on the chest plate: heard, and felt in the camera.
         this.sfx.play('punch');
         if (e.power > 0.6) this.view.rig.shake(Math.min(0.12, 0.05 * e.power));
         break;
