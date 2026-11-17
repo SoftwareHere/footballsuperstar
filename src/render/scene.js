@@ -3,81 +3,146 @@ import { QB, BODY_RADIUS, JUMP, GRAVITY } from '../config.js';
 import { P } from '../physics/body.js';
 import { angleDelta } from '../core/vec.js';
 import { createField } from './field.js';
-import { createSkyTexture, SUN_DIR } from './sky.js';
+import { createSky } from './sky.js';
 import { createStadium } from './stadium.js';
 import { Effects } from './effects.js';
 import { AthleteModel } from './athleteModel.js';
 import { BallModel } from './ballModel.js';
 import { Markers } from './markers.js';
 import { CameraRig } from './cameraRig.js';
+import { LIGHTING } from './lighting.js';
+import { Pipeline } from './pipeline.js';
 
 export const USER_COLORS = { jersey: 0x1e6bff, trim: 0xffffff, helmet: 0xf4f6fa, pants: 0xf4f6fa };
 const QB_COLORS = { jersey: 0xff7a1a, trim: 0x1b1b1f, helmet: 0xe9e9ee, pants: 0x2b2f36, skin: 0xc68c5a };
 
 const mix = (a, b, t) => a + (b - a) * t;
 
-// Picture quality, best last: [pixel ratio cap, shadows, floodlight glare].
-// The game starts at the top and steps down if the machine cannot hold a
-// playable frame rate.
-const QUALITY = [
-  [0.5, false, false],
-  [0.75, false, false],
-  [1, true, true],
-  [2, true, true],
+/**
+ * Picture quality, cheapest first. The game picks a starting tier from the
+ * graphics chip and steps down while the frame rate stays low.
+ *   ratio    cap on device pixels per CSS pixel
+ *   shadow   sun shadow map size (0: no real shadows, just the soft blobs)
+ *   post     camera pipeline: HDR, bloom, grade, vignette, grain
+ *   pbr      full physically based turf (otherwise the matte, cheap kind)
+ */
+const TIERS = [
+  { ratio: 0.6, shadow: 0, post: false, pbr: false },
+  { ratio: 0.8, shadow: 0, post: false, pbr: false },
+  { ratio: 1, shadow: 1024, post: false, pbr: true },
+  { ratio: 1.5, shadow: 2048, post: true, pbr: true },
+  { ratio: 2, shadow: 2048, post: true, pbr: true },
 ];
+export const GRAPHICS = { low: 0, medium: 2, high: 4 };
+const GFX_KEY = 'footballsuperstar.gfx.v1';
+
+function gpuName(renderer) {
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    return String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+  } catch {
+    return '';
+  }
+}
+
+/** A first guess at what the machine can draw, from the name of its graphics chip. */
+function guessTier(gpu) {
+  const name = gpu.toLowerCase();
+  const nav = globalThis.navigator || {};
+  const mobile = /android|iphone|ipad|mobile/i.test(nav.userAgent || '') || (nav.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 820);
+  let tier = 2;
+  if (/swiftshader|llvmpipe|softpipe|software|basic render/.test(name)) tier = 0;
+  else if (mobile) tier = 1;
+  else if (/nvidia|geforce|quadro|rtx|gtx|radeon rx|radeon pro|apple m\d (pro|max|ultra)/.test(name)) tier = 4;
+  else if (/apple m\d|apple gpu|intel\(r\) arc| arc /.test(name)) tier = 3;
+  if (nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) tier = Math.min(tier, 2);
+  return tier;
+}
+
+function loadGfx() {
+  try {
+    return JSON.parse(globalThis.localStorage?.getItem(GFX_KEY) || 'null');
+  } catch {
+    return null;
+  }
+}
+function saveGfx(value) {
+  try {
+    globalThis.localStorage?.setItem(GFX_KEY, JSON.stringify(value));
+  } catch {
+    /* storage unavailable: start from the guess next time */
+  }
+}
 
 /** Everything Three.js: owns the renderer and mirrors the simulation each frame. */
 export class SceneView {
-  /** `quality`: 'high' or 'low' pins the picture quality; anything else adapts. */
-  constructor(canvas, quality = 'auto') {
+  /**
+   * `quality`: 'low', 'medium' or 'high' pins the picture quality; 'auto'
+   * (or anything else) adapts. `lighting`: 'golden', 'night' or 'midday'.
+   */
+  constructor(canvas, { quality = 'auto', lighting = 'golden' } = {}) {
     this.canvas = canvas;
     const renderer = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }));
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.info.autoReset = false; // counted per frame, across every pass
+    this.gpu = gpuName(renderer);
+    const stored = loadGfx();
+    this.autoTier = guessTier(this.gpu);
+    if (stored && stored.gpu === this.gpu && Number.isInteger(stored.tier)) this.autoTier = Math.min(this.autoTier, stored.tier);
+    const startTier = quality in GRAPHICS ? GRAPHICS[quality] : this.autoTier;
+    this.post = Pipeline.supported(renderer) ? new Pipeline(renderer) : null;
 
     const scene = (this.scene = new THREE.Scene());
-    // One painted sky does three jobs: backdrop, ambient light, and what helmets reflect.
-    const sky = createSkyTexture();
-    scene.background = sky;
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromEquirectangular(sky).texture;
-    scene.environmentIntensity = 0.75;
-    pmrem.dispose();
-    scene.fog = new THREE.Fog(0xcfdde6, 130, 460);
-
-    // Late-afternoon sun, low enough to throw long shadows across the turf.
-    scene.add(new THREE.HemisphereLight(0xcfe2ff, 0x35603c, 0.85));
-    const sun = (this.sun = new THREE.DirectionalLight(0xffe7bf, 3.1));
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    const sc = sun.shadow.camera;
-    sc.left = sc.bottom = -24;
-    sc.right = sc.top = 24;
-    sc.near = 1;
-    sc.far = 150;
-    sun.shadow.bias = -0.0005;
-    sun.shadow.normalBias = 0.02;
+    this.sky = createSky();
+    scene.add(this.sky.mesh);
+    scene.fog = new THREE.Fog(0xcfdde6, 150, 700);
+    this.hemi = new THREE.HemisphereLight(0xcfe2ff, 0x35603c, 0.4);
+    scene.add(this.hemi);
+    const sun = (this.sun = new THREE.DirectionalLight(0xffe7bf, 3));
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.025;
+    sun.shadow.radius = 2;
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 220;
     scene.add(sun, sun.target);
+    this.fill = new THREE.DirectionalLight(0xffffff, 0);
+    scene.add(this.fill, this.fill.target);
+    this.sunDir = new THREE.Vector3(0, 1, 0);
+    this.shadowHalf = 0;
 
-    scene.add(createField());
-    const stadium = createStadium();
+    const detail = startTier >= 2 ? 2 : 1;
+    this.field = createField(detail >= 2 ? 32 : 16);
+    scene.add(this.field.group);
+    const stadium = (this.stadium = createStadium());
     scene.add(stadium.group);
     this.drawScore = stadium.setScore;
-    this.flares = stadium.flares;
     this.scoreKey = '';
     this.fx = new Effects();
     scene.add(this.fx.group);
     this.fxState = { wr: { air: false, wait: 0 }, db: { air: false, wait: 0 } };
 
-    this.userModel = new AthleteModel(USER_COLORS, 1);
-    this.rivalModel = new AthleteModel({ jersey: 0xc8102e, trim: 0xffffff, helmet: 0x222222, pants: 0x222222, skin: 0x6b4226 }, 2);
-    this.qbModel = new AthleteModel(QB_COLORS, 12);
+    this.userModel = new AthleteModel(USER_COLORS, 1, detail);
+    this.rivalModel = new AthleteModel({ jersey: 0xc8102e, trim: 0xffffff, helmet: 0x222222, pants: 0x222222, skin: 0x6b4226 }, 2, detail);
+    this.qbModel = new AthleteModel(QB_COLORS, 12, detail);
     this.ball = new BallModel();
     this.markers = new Markers();
     scene.add(this.userModel.group, this.rivalModel.group, this.qbModel.group, this.ball.group, this.ball.shadow, this.markers.group);
+    // Left out of the reflection picture: the players, and the turf (it would
+    // flood every white uniform with green; the sky's own ground stands in).
+    this.dynamic = [this.userModel.group, this.rivalModel.group, this.qbModel.group, this.ball.group, this.ball.shadow, this.markers.group, this.fx.group, this.field.group];
+
+    // Reflections and ambient light come from a picture of the stadium itself,
+    // taken once from the middle of the field whenever the lighting changes.
+    this.cubeTarget = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType });
+    this.cubeCamera = new THREE.CubeCamera(0.5, 900, this.cubeTarget);
+    this.cubeCamera.position.set(0, 6, -14);
+    scene.add(this.cubeCamera);
+    this.pmrem = new THREE.PMREMGenerator(renderer);
+    this.envTarget = null;
+    this.envDirty = true;
 
     this.rig = new CameraRig(1);
     this.focus = { x: 0, y: 0, z: 0, speed: 0 };
@@ -86,27 +151,95 @@ export class SceneView {
     this.bodies = [0, 1].map(() => ({ chest: new THREE.Vector3(), sh: [new THREE.Vector3(), new THREE.Vector3()] }));
     this.ballPos = { x: 0, y: 0, z: 0 };
     this.throwClock = 0;
-    this.pinned = quality === 'high' || quality === 'low';
-    this.slow = { time: 0, frames: 0, strikes: 0, warm: 2 };
-    this.setQuality(quality === 'low' ? 0 : QUALITY.length - 1);
+    this.time = 0;
+    this.dirty = true;
+    this.pinned = quality in GRAPHICS;
+    this.slow = { time: 0, frames: 0, strikes: 0, warm: 2, probe: null };
+    this.setLighting(lighting);
+    this.setQuality(startTier);
+  }
+
+  /** 'low' | 'medium' | 'high' pin the picture quality; 'auto' lets it adapt. */
+  setGraphics(mode) {
+    this.pinned = mode in GRAPHICS;
+    this.slow = { time: 0, frames: 0, strikes: 0, warm: 2, probe: null };
+    this.setQuality(this.pinned ? GRAPHICS[mode] : this.autoTier);
   }
 
   setQuality(level) {
-    this.quality = Math.max(0, Math.min(QUALITY.length - 1, level));
-    const [ratio, shadows, glare] = QUALITY[this.quality];
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, ratio));
-    this.sun.castShadow = shadows;
-    for (const flare of this.flares) flare.visible = glare;
+    this.quality = Math.max(0, Math.min(TIERS.length - 1, level));
+    const t = TIERS[this.quality];
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, t.ratio));
+    const sun = this.sun;
+    const shadows = t.shadow > 0;
+    if (shadows && sun.shadow.mapSize.x !== t.shadow) {
+      sun.shadow.mapSize.set(t.shadow, t.shadow);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    }
+    sun.castShadow = shadows;
+    this.fx.blobStrength = shadows ? 0.55 : 1;
+    this.field.setQuality(t.pbr);
+    this.usePost = t.post && this.post !== null;
     this.resize();
+    this.dirty = true;
+  }
+
+  /** Golden hour, night or midday. */
+  setLighting(name) {
+    const L = LIGHTING[name] || LIGHTING.golden;
+    this.lighting = LIGHTING[name] ? name : 'golden';
+    this.preset = L;
+    this.sunDir.set(...L.key.dir).normalize();
+    this.sun.color.setHex(L.key.color);
+    this.sun.intensity = L.key.intensity;
+    if (L.fill) {
+      this.fill.color.setHex(L.fill.color);
+      this.fill.intensity = L.fill.intensity;
+      this.fill.position.set(...L.fill.dir).multiplyScalar(80);
+      this.fill.visible = true;
+    } else {
+      this.fill.visible = false;
+    }
+    this.hemi.color.setHex(L.hemi.sky);
+    this.hemi.groundColor.setHex(L.hemi.ground);
+    this.hemi.intensity = L.hemi.intensity;
+    this.scene.environmentIntensity = L.env;
+    this.scene.fog.color.setHex(L.fog.color);
+    this.scene.fog.near = L.fog.near;
+    this.scene.fog.far = L.fog.far;
+    this.renderer.toneMappingExposure = L.exposure;
+    this.sky.set(L.sky, L.sunDir || L.key.dir);
+    this.stadium.setLights(L);
+    this.post?.setGrade(L.grade);
+    if (this.post) this.post.bloomStrength = name === 'night' ? 0.85 : 0.5;
+    this.envDirty = true;
+    this.dirty = true;
+    this.lightOn(this.focus.x, this.focus.z);
+  }
+
+  /** Re-take the picture of the stadium that everything reflects. */
+  captureEnvironment() {
+    this.envDirty = false;
+    for (const o of this.dynamic) o.userData.wasVisible = o.visible;
+    for (const o of this.dynamic) o.visible = false;
+    const castShadow = this.sun.castShadow;
+    this.sun.castShadow = false;
+    this.scene.environment = null;
+    this.cubeCamera.update(this.renderer, this.scene);
+    this.envTarget = this.pmrem.fromCubemap(this.cubeTarget.texture, this.envTarget);
+    this.scene.environment = this.envTarget.texture;
+    this.sun.castShadow = castShadow;
+    for (const o of this.dynamic) o.visible = o.userData.wasVisible;
   }
 
   /**
-   * Watch the frame rate and trade picture quality for it when it stays low:
-   * first resolution, then shadows. It only ever steps down, so the picture
-   * does not flicker between settings.
+   * Watch the frame rate and trade picture quality for it when it stays low.
+   * If a step down does not help, the limit is somewhere else (the display,
+   * or the processor), so the picture goes back up and stays there.
    */
   tune(real) {
-    if (this.pinned || this.quality === 0 || real <= 0) return;
+    if (this.pinned || real <= 0) return;
     const w = this.slow;
     if (w.warm > 0) {
       w.warm -= real; // shaders are still compiling: not a fair sample
@@ -118,10 +251,23 @@ export class SceneView {
     const fps = w.frames / w.time;
     w.time = 0;
     w.frames = 0;
-    w.strikes = fps < 26 ? w.strikes + 1 : 0;
-    if (w.strikes >= 2) {
+    if (w.probe) {
+      const { from, before } = w.probe;
+      w.probe = null;
+      if (fps < before * 1.08) {
+        this.setQuality(from);
+        this.pinned = true;
+        return;
+      }
+      saveGfx({ gpu: this.gpu, tier: this.quality });
+      this.autoTier = this.quality;
+    }
+    const floor = this.quality >= 2 ? 45 : 28;
+    w.strikes = fps < floor ? w.strikes + 1 : 0;
+    if (w.strikes >= 2 && this.quality > 0) {
       w.strikes = 0;
       w.warm = 1;
+      w.probe = { from: this.quality, before: fps };
       this.setQuality(this.quality - 1);
     }
   }
@@ -136,11 +282,30 @@ export class SceneView {
     this.renderer.setSize(w, h, false);
     this.rig.camera.aspect = w / h;
     this.rig.camera.updateProjectionMatrix();
+    const r = this.renderer.getPixelRatio();
+    this.post?.setSize(Math.max(1, Math.floor(w * r)), Math.max(1, Math.floor(h * r)));
+    this.dirty = true;
   }
 
-  lightOn(x, z) {
-    this.sun.position.set(x + SUN_DIR.x * 70, SUN_DIR.y * 70, z + SUN_DIR.z * 70);
-    this.sun.target.position.set(x, 0, z);
+  /**
+   * Aim the shadows at the play: the sun's shadow box covers both players
+   * (x, z and ox, oz), and no more, so its detail is spent where it shows.
+   */
+  lightOn(x, z, ox = x, oz = z) {
+    const cx = (x + ox) / 2;
+    const cz = (z + oz) / 2;
+    const half = Math.min(28, Math.max(12, Math.ceil((Math.hypot(ox - x, oz - z) / 2 + 7) / 4) * 4));
+    const cam = this.sun.shadow.camera;
+    if (half !== this.shadowHalf) {
+      this.shadowHalf = half;
+      cam.left = cam.bottom = -half;
+      cam.right = cam.top = half;
+      cam.updateProjectionMatrix();
+    }
+    const d = this.sunDir;
+    this.sun.position.set(cx + d.x * 90, d.y * 90, cz + d.z * 90);
+    this.sun.target.position.set(cx, 0, cz);
+    if (this.fill.visible) this.fill.target.position.set(cx, 0, cz);
   }
 
   /** Repaint the stadium scoreboard when the score changes. */
@@ -320,7 +485,7 @@ export class SceneView {
     this.focus.y = userState.y;
     this.focus.z = userState.z;
     this.focus.speed = user.speed;
-    this.lightOn(user.pos.x, user.pos.z);
+    this.lightOn(user.pos.x, user.pos.z, rival.pos.x, rival.pos.z);
     this.rig.update(dt, {
       focus: this.focus,
       other: userRole === 'db' && rep.phase !== 'done' ? rival.pos : null,
@@ -359,7 +524,17 @@ export class SceneView {
     return { x: (x + 1) / 2, y: (1 - y) / 2, visible, behind };
   }
 
-  render() {
-    this.renderer.render(this.scene, this.rig.camera);
+  /** Draw the frame. `dt` drives the drifting clouds and the film grain. */
+  render(dt = 0) {
+    this.renderer.info.reset();
+    if (this.envDirty) this.captureEnvironment();
+    this.time += dt;
+    this.sky.uniforms.uTime.value = this.time;
+    if (this.usePost) this.post.render(this.scene, this.rig.camera, dt);
+    else {
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(this.scene, this.rig.camera);
+    }
+    this.dirty = false;
   }
 }

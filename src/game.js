@@ -1,4 +1,4 @@
-import { SIM_DT, REP, CAMERA_MODES } from './config.js';
+import { SIM_DT, REP, CAMERA_MODES, LIGHTING_MODES, GRAPHICS_MODES } from './config.js';
 import { RNG } from './core/rng.js';
 import { Input } from './core/input.js';
 import { Match } from './sim/match.js';
@@ -77,7 +77,12 @@ export class Game {
   constructor({ canvas, uiRoot }) {
     this.career = loadCareer();
     const query = new URLSearchParams(window.location.search);
-    this.view = new SceneView(canvas, query.get('quality') || 'auto');
+    // The address can override the saved picture settings (?quality=low, ?lighting=night).
+    this.view = new SceneView(canvas, {
+      quality: query.get('quality') || this.career.settings.graphics,
+      lighting: query.get('lighting') || this.career.settings.lighting,
+    });
+    this.lastDraw = 0;
     this.input = new Input(window);
     this.sfx = new Sfx();
     this.sfx.setMuted(this.career.settings.muted);
@@ -99,6 +104,7 @@ export class Game {
       spend: (stat) => this.spend(stat),
       reset: () => this.reset(),
       resume: () => this.setPaused(false),
+      setting: (key, value) => this.setting(key, value),
       quit: () => this.toMenu(),
       sound: (name) => this.sfx.play(name),
       seenHowTo: () => {
@@ -170,8 +176,22 @@ export class Game {
     return true;
   }
 
+  /** A picture setting changed: lighting or graphics. Applied at once, behind the menu. */
+  setting(key, value) {
+    if (key === 'lighting' && LIGHTING_MODES.includes(value)) {
+      this.career.settings.lighting = value;
+      this.view.setLighting(value);
+    } else if (key === 'graphics' && GRAPHICS_MODES.includes(value)) {
+      this.career.settings.graphics = value;
+      this.view.setGraphics(value);
+    } else return;
+    saveCareer(this.career);
+  }
+
   reset() {
+    const { lighting, graphics } = this.career.settings;
     this.career = resetCareer();
+    Object.assign(this.career.settings, { lighting, graphics });
     this.career.seenHowTo = true;
     saveCareer(this.career);
     this.sfx.setMuted(false);
@@ -460,8 +480,16 @@ export class Game {
       this.ui.root.classList.toggle('cinematic', cinematic);
     }
     this.ui.tick(real);
-    this.view.tune(Math.min(elapsed, 1)); // the true frame time, not the capped one
-    this.view.render();
+    // Only judge the frame rate while a game is being played; the menus are
+    // drawn at 30 frames a second to save power, and a paused game only when
+    // something on screen changed.
+    const playing = this.state !== 'menu' && !this.paused;
+    if (playing) this.view.tune(Math.min(elapsed, 1)); // the true frame time, not the capped one
+    const due = playing || (this.paused ? this.view.dirty : now - this.lastDraw >= 1000 / 31);
+    if (due) {
+      this.view.render((now - this.lastDraw) / 1000 > 0.25 ? 0 : (now - this.lastDraw) / 1000);
+      this.lastDraw = now;
+    }
     requestAnimationFrame(this.frame);
   }
 

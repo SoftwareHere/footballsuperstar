@@ -438,7 +438,17 @@ h2 {
 
 .segs {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
+}
+
+.screen-settings .panel {
+  width: min(600px, 100%);
+}
+
+.screen-settings .length {
+  margin-top: 18px;
 }
 
 .seg {

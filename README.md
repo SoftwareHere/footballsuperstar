@@ -6,7 +6,9 @@ the ball, cornerback when he does. Win games, level up, and build a player who
 wins more.
 
 It runs in the browser (Three.js). There are no art or audio files: the
-stadium, players and sounds are all generated in code. The players are jointed
+stadium, players and sounds are all generated in code, and the picture is
+built to look like a TV broadcast while staying light enough for a laptop's
+built-in graphics. The players are jointed
 bodies animated from what they are doing: their feet plant, they lean into
 cuts, their hands go to the ball and to each other, and they load their legs
 and leave the ground to jump. They fight to stay on their feet through
@@ -25,9 +27,16 @@ npm run dev
 
 Then open the address Vite prints (http://localhost:5173 by default).
 
-If the frame rate stays low the game lowers its own picture quality (first
-resolution, then shadows). Add `?quality=high` or `?quality=low` to the address
-to pin it instead.
+**Settings** (from the main menu or the pause menu) has two picture options:
+
+- **Lighting**: golden hour (low sun from the side, long shadows), night
+  under the floodlights, or bright midday.
+- **Graphics**: Auto, Low, Medium or High. Auto starts from what your
+  graphics chip can do and lowers the picture if the game does not run
+  smoothly; the level it settles on is remembered for next time.
+
+`?quality=low|medium|high|auto` and `?lighting=golden|night|midday` in the
+address override the saved settings.
 
 To make a static build you can host anywhere:
 
@@ -182,7 +191,10 @@ src/
     getup.js         how a man on the turf gets back to his feet
   progression/     XP, levels, rivals, save data
   render/          Three.js scene, sky, stadium, field, effects, camera
-    athlete/         the player: skeleton and meshes, inverse kinematics,
+    lighting.js      the three lighting presets
+    pipeline.js      the camera look: HDR, bloom, tone curve, grade, grain
+    athlete/         the player: one skinned body over a skeleton, the
+                     uniform painted into one texture, inverse kinematics,
                      procedural animation, rag-doll-to-skeleton posing
   ui/              menus and HUD
   audio/           synthesized sound effects
@@ -206,3 +218,26 @@ available to Node and the dev server running:
 ```bash
 npm run e2e
 ```
+
+`npm run perf` (dev server running) prints the frame time, draw calls and
+triangles for each picture quality and lighting.
+
+## How the picture stays cheap
+
+Everything expensive is done once, not every frame: the uniforms, turf and
+crowd are painted into textures and merged meshes at load, and reflections
+come from one picture of the stadium taken whenever the lighting changes.
+Each player is a single skinned mesh (one draw call) and the whole stadium is
+a handful, so a frame is about 30 draw calls. The picture quality has five
+levels:
+
+| Level | Resolution | Shadows | Camera look (HDR, bloom, grade) | Turf |
+| --- | --- | --- | --- | --- |
+| 0 (Low) | 0.6x | soft blobs only | no | matte |
+| 1 | 0.8x | soft blobs only | no | matte |
+| 2 (Medium) | 1x | 1024 shadow map | no | full |
+| 3 | 1.5x | 2048 shadow map | yes | full |
+| 4 (High) | 2x | 2048 shadow map | yes | full |
+
+The menus draw at 30 frames a second and a paused game is not redrawn at
+all, to save battery.

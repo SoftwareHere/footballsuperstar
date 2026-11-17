@@ -1,24 +1,73 @@
 import * as THREE from 'three';
+import { RNG } from '../core/rng.js';
+import { makeCanvas, writeNormals, canvasTexture } from './textures.js';
+
+const HALF_LENGTH = 0.16;
+const RADIUS = 0.1;
+
+/** Pebbled leather, four panel seams, white stripes near the tips and the laces on top. */
+function leather() {
+  const W = 512;
+  const H = 256;
+  const rng = new RNG(77);
+  const canvas = makeCanvas(W, H);
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#6e3518';
+  g.fillRect(0, 0, W, H);
+  // Wear: lighter and darker patches.
+  for (let i = 0; i < 60; i++) {
+    const x = rng.next() * W;
+    const y = rng.next() * H;
+    const r = 8 + rng.next() * 30;
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, rng.chance(0.5) ? 'rgba(150,80,40,0.25)' : 'rgba(40,15,5,0.25)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  const height = new Float32Array(W * H);
+  for (let i = 0; i < height.length; i++) height[i] = rng.next() * 0.5;
+  // Seams between the panels.
+  g.fillStyle = 'rgba(25,10,4,0.85)';
+  for (let k = 0; k < 4; k++) {
+    const x = Math.round((0.125 + k * 0.25) * W);
+    g.fillRect(x - 1.5, 0, 3, H);
+    for (let y = 0; y < H; y++) for (let d = -3; d <= 3; d++) height[y * W + ((x + d + W) % W)] = Math.abs(d) < 2 ? 0 : 0.2;
+  }
+  // Stripes near each tip.
+  g.fillStyle = '#f1ede2';
+  for (const v of [0.17, 0.79]) g.fillRect(0, v * H, W, 0.045 * H);
+  // Laces on top: a strip and eight stitches across it.
+  g.fillStyle = '#f4f1e8';
+  const lx = W / 2;
+  g.fillRect(lx - 3, H * 0.32, 6, H * 0.36);
+  for (let i = 0; i < 8; i++) {
+    const y = H * (0.34 + i * 0.045);
+    g.fillRect(lx - 14, y, 28, 5);
+    for (let x = lx - 14; x < lx + 14; x++) for (let d = 0; d < 5; d++) height[Math.floor(y + d) * W + x] = 1;
+  }
+  const n = makeCanvas(W, H);
+  const ng = n.getContext('2d');
+  const img = ng.createImageData(W, H);
+  writeNormals(img, W, height, W, H, 1.2);
+  ng.putImageData(img, 0, 0);
+  return { map: canvasTexture(canvas, { anisotropy: 4 }), normal: canvasTexture(n, { srgb: false, anisotropy: 4 }) };
+}
 
 /** The football, plus a soft shadow blob so its position reads in the air. */
 export class BallModel {
   constructor() {
     this.group = new THREE.Group();
-    const leather = new THREE.MeshStandardMaterial({ color: 0x7a3f1d, roughness: 0.6 });
-    const white = new THREE.MeshStandardMaterial({ color: 0xf5f2ea, roughness: 0.6 });
-    this.spinner = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.105, 14, 10), leather);
-    body.scale.set(1, 1, 1.65);
-    body.castShadow = true;
-    this.spinner.add(body);
-    for (const z of [-0.105, 0.105]) {
-      const stripe = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.011, 6, 16), white);
-      stripe.position.z = z;
-      this.spinner.add(stripe);
+    const profile = [];
+    for (let i = 0; i <= 24; i++) {
+      const t = -1 + (i / 24) * 2;
+      profile.push(new THREE.Vector2(Math.max(0.0008, RADIUS * Math.pow(1 - t * t, 0.72)), t * HALF_LENGTH));
     }
-    const laces = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, 0.11), white);
-    laces.position.y = 0.105;
-    this.spinner.add(laces);
+    const geo = new THREE.LatheGeometry(profile, 24);
+    geo.rotateX(Math.PI / 2); // long axis along z, laces on top
+    const { map, normal } = leather();
+    this.spinner = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map, normalMap: normal, normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.58 }));
+    this.spinner.castShadow = true;
     this.group.add(this.spinner);
 
     this.shadow = new THREE.Mesh(

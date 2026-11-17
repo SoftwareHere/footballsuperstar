@@ -6,29 +6,11 @@ import { angleDelta } from '../core/vec.js';
 import { buildRig } from './athlete/rig.js';
 import { Animator } from './athlete/animator.js';
 import { poseFromRagdoll } from './athlete/ragdollPose.js';
+import { ATLAS, paintLook, sharedMaps } from './athlete/uniform.js';
+import { makeCanvas, canvasTexture } from './textures.js';
 
 const B = BODY;
 const smooth = (t) => t * t * (3 - 2 * t);
-
-function numberTexture(number, color, outline) {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 256;
-  const g = canvas.getContext('2d');
-  g.clearRect(0, 0, 256, 256);
-  g.font = '900 190px "Arial Narrow", Impact, "Helvetica Neue", sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.lineJoin = 'round';
-  g.lineWidth = 16;
-  g.strokeStyle = outline;
-  g.strokeText(String(number), 128, 138);
-  g.fillStyle = color;
-  g.fillText(String(number), 128, 138);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
 
 const tmp = new THREE.Vector3();
 const LIE = {};
@@ -51,22 +33,21 @@ const TURN = 6; // rad/s he turns to face the play once he is back on his feet
  * The model faces +z; one unit is one yard.
  */
 export class AthleteModel {
-  constructor(colors, number = 1) {
-    this.mats = {
-      jersey: new THREE.MeshStandardMaterial({ roughness: 0.78 }),
-      trim: new THREE.MeshStandardMaterial({ roughness: 0.7 }),
-      helmet: new THREE.MeshPhysicalMaterial({ roughness: 0.22, metalness: 0.15, clearcoat: 1, clearcoatRoughness: 0.12, side: THREE.DoubleSide }),
-      pants: new THREE.MeshStandardMaterial({ roughness: 0.72 }),
-      skin: new THREE.MeshStandardMaterial({ color: 0x8d5a3b, roughness: 0.62 }),
-      sock: new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85 }),
-      glove: new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6 }),
-      dark: new THREE.MeshStandardMaterial({ color: 0x17191e, roughness: 0.5 }),
-      sole: new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.7 }),
-      mask: new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.35, metalness: 0.7 }),
-      visor: new THREE.MeshPhysicalMaterial({ color: 0x0b0d12, roughness: 0.08, metalness: 0.4, clearcoat: 1, side: THREE.DoubleSide }),
-      number: new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.35, toneMapped: true }),
-    };
-    this.rig = buildRig(this.mats);
+  constructor(colors, number = 1, detail = 2) {
+    // One material for the whole man: his uniform is painted into one texture.
+    const maps = sharedMaps();
+    this.canvas = makeCanvas(detail >= 2 ? ATLAS : ATLAS / 2);
+    this.texture = canvasTexture(this.canvas, { anisotropy: 4 });
+    this.material = new THREE.MeshStandardMaterial({
+      map: this.texture,
+      normalMap: maps.normal,
+      normalScale: new THREE.Vector2(0.5, 0.5),
+      roughnessMap: maps.orm,
+      metalnessMap: maps.orm,
+      roughness: 1,
+      metalness: 1,
+    });
+    this.rig = buildRig(this.material);
     this.group = this.rig.root;
     this.animator = new Animator(this.rig);
     this.ragdoll = new Ragdoll();
@@ -94,18 +75,8 @@ export class AthleteModel {
   }
 
   setLook(colors, number) {
-    const M = this.mats;
-    M.jersey.color.setHex(colors.jersey);
-    M.trim.color.setHex(colors.trim);
-    M.helmet.color.setHex(colors.helmet);
-    M.pants.color.setHex(colors.pants);
-    if (colors.skin) M.skin.color.setHex(colors.skin);
-    // Numbers in the trim colour, edged so they read on any jersey.
-    const jersey = new THREE.Color(colors.jersey);
-    const lum = jersey.r * 0.3 + jersey.g * 0.59 + jersey.b * 0.11;
-    M.number.map?.dispose();
-    M.number.map = numberTexture(number, '#' + new THREE.Color(colors.trim).getHexString(), lum > 0.5 ? '#16181d' : 'rgba(0,0,0,0.55)');
-    M.number.needsUpdate = true;
+    paintLook(this.canvas, { skin: 0x8d5a3b, ...colors }, number);
+    this.texture.needsUpdate = true;
   }
 
   /** Back to a clean standing pose (new rep). */
