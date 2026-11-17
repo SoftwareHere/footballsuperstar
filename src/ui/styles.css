@@ -21,6 +21,10 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
   background: #0b1a33;
   color: var(--ink);
   font-family: var(--body);
@@ -186,12 +190,30 @@ h2 {
   transition: transform 0.08s, background 0.12s, border-color 0.12s;
 }
 
-.btn:hover:not(:disabled),
 .btn:focus-visible {
   background: rgba(255, 255, 255, 0.18);
   border-color: #fff;
   outline: none;
   transform: translateY(-1px);
+}
+
+/* Hover only where there is a mouse: on a touch screen it sticks after a tap. */
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.18);
+    border-color: #fff;
+    transform: translateY(-1px);
+  }
+  .btn.primary:hover:not(:disabled) {
+    background: #fff07f;
+  }
+  .rival:hover:not(:disabled) {
+    border-color: #fff;
+  }
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .btn:focus-visible {
@@ -204,7 +226,6 @@ h2 {
   color: #141a05;
 }
 
-.btn.primary:hover:not(:disabled),
 .btn.primary:focus-visible {
   background: #fff07f;
 }
@@ -327,7 +348,6 @@ h2 {
   cursor: pointer;
 }
 
-.rival:hover:not(:disabled),
 .rival:focus-visible {
   border-color: #fff;
   outline: none;
@@ -1053,5 +1073,740 @@ h2 {
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+}
+
+/* =====================================================================
+   Phones and tablets
+   ===================================================================== */
+
+:root {
+  --sl: env(safe-area-inset-left, 0px);
+  --sr: env(safe-area-inset-right, 0px);
+  --sb: env(safe-area-inset-bottom, 0px);
+  --st: env(safe-area-inset-top, 0px);
+}
+
+/* A button name in a hint, for the on-screen controls. */
+kbd.pad {
+  border-radius: 99px;
+  border-color: var(--accent);
+  border-bottom-width: 1px;
+  background: rgba(255, 226, 61, 0.16);
+  color: var(--accent);
+  font: 800 0.8em var(--display);
+  letter-spacing: 0.08em;
+}
+
+/* ----------------------------------------------------- rotate prompt */
+
+.rotate {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(ellipse at center, #13284d, #060c18);
+  color: var(--ink);
+  text-align: center;
+  touch-action: none;
+}
+
+.rotate-card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 300px;
+}
+
+.rotate-card b {
+  font: italic 900 30px/1 var(--display);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.rotate-card span {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.rotate-phone {
+  position: relative;
+  width: 52px;
+  height: 88px;
+  margin-bottom: 18px;
+  border: 4px solid var(--ink);
+  border-radius: 12px;
+  animation: rotate-phone 2.2s ease-in-out infinite;
+}
+
+.rotate-phone i {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 14px;
+  height: 4px;
+  margin-left: -7px;
+  border-radius: 9px;
+  background: var(--ink);
+}
+
+@keyframes rotate-phone {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  55%,
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+
+/* ------------------------------------------------------ touch controls */
+
+.touchpad {
+  position: absolute;
+  inset: 0;
+  font-family: var(--display);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.touchpad button {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+  pointer-events: auto;
+  outline: none;
+  cursor: pointer;
+}
+
+.tp-zone {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 42%;
+  height: 72%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.tp-stick {
+  position: absolute;
+  left: calc(var(--sl) + 26px);
+  bottom: calc(var(--sb) + 22px);
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.04) 40%, rgba(255, 255, 255, 0.14));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  opacity: 0.75;
+  transition: opacity 0.12s;
+  pointer-events: none;
+}
+
+.tp-stick.held {
+  opacity: 1;
+}
+
+.tp-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  margin: -29px 0 0 -29px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ffffff, #c9d6ea);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+.tp-buttons {
+  position: absolute;
+  right: calc(var(--sr) + 14px);
+  bottom: calc(var(--sb) + 12px);
+  width: 222px;
+  height: 172px;
+  transform-origin: bottom right;
+}
+
+.tp-btn {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+  background: rgba(9, 15, 30, 0.55);
+  color: var(--ink);
+  font: 800 13px var(--display);
+  letter-spacing: 0.08em;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.35);
+  transition: transform 0.06s, background 0.06s;
+}
+
+.tp-btn.down {
+  transform: scale(0.92);
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.tp-jump {
+  right: 0;
+  bottom: 0;
+  width: 86px;
+  height: 86px;
+  border-color: var(--accent);
+  background: rgba(255, 226, 61, 0.28);
+  font-size: 16px;
+}
+
+.tp-jump.down {
+  background: rgba(255, 226, 61, 0.6);
+}
+
+.tp-sprint {
+  right: 98px;
+  bottom: 4px;
+  width: 70px;
+  height: 70px;
+  border-color: #36c5ff;
+  background: rgba(54, 197, 255, 0.22);
+  font-size: 12px;
+}
+
+.tp-sprint.down {
+  background: rgba(54, 197, 255, 0.55);
+}
+
+.tp-call {
+  right: 8px;
+  bottom: 100px;
+  width: 70px;
+  height: 70px;
+  border-color: var(--good);
+  background: rgba(95, 227, 143, 0.24);
+}
+
+.tp-call b {
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+
+.tp-call.down {
+  background: rgba(95, 227, 143, 0.58);
+}
+
+.tp-call.off {
+  opacity: 0.35;
+}
+
+.tp-cutl,
+.tp-cutr {
+  bottom: 88px;
+  width: 62px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.tp-cutr {
+  right: 86px;
+}
+
+.tp-cutl {
+  right: 154px;
+}
+
+.tp-arrow {
+  width: 0;
+  height: 0;
+  border-block: 6px solid transparent;
+}
+
+.tp-arrow.l {
+  border-right: 8px solid currentColor;
+}
+
+.tp-arrow.r {
+  border-left: 8px solid currentColor;
+}
+
+.tp-icon {
+  position: absolute;
+  top: calc(var(--st) + 10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 800 11px var(--display);
+  letter-spacing: 0.06em;
+}
+
+.tp-pause {
+  left: calc(var(--sl) + 10px);
+}
+
+.tp-pause i {
+  width: 5px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+
+.tp-cam {
+  right: calc(var(--sr) + 10px);
+}
+
+/* Bigger hands on a tablet. */
+@media (min-height: 600px) and (min-width: 900px) {
+  .touch .tp-buttons {
+    transform: scale(1.25);
+  }
+  .touch .tp-stick {
+    transform-origin: bottom left;
+  }
+}
+
+/* --------------------------------------------- HUD with touch controls */
+
+.touch .stamina {
+  top: calc(var(--st) + 16px);
+  left: calc(var(--sl) + 64px);
+  bottom: auto;
+  width: 120px;
+}
+
+.touch .hints {
+  bottom: calc(var(--sb) + 12px);
+  left: calc(var(--sl) + 170px);
+  right: calc(var(--sr) + 250px);
+  width: fit-content;
+  max-width: none;
+  margin-inline: auto;
+  padding: 6px 12px;
+  transform: none;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.touch .hints kbd:not(:first-child) {
+  margin-left: 0.5em;
+}
+
+.touch .tip {
+  top: 112px;
+  bottom: auto;
+  font-size: 13px;
+}
+
+/* ------------------------------------- short landscape screens (phones) */
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .screen {
+    padding: 8px calc(var(--sr) + 12px) 8px calc(var(--sl) + 12px);
+  }
+
+  .panel {
+    padding: 14px 18px 12px;
+    border-radius: 14px;
+  }
+
+  .panel.wide {
+    width: min(860px, 100%);
+  }
+
+  h2 {
+    margin-bottom: 9px;
+    font-size: 22px;
+  }
+
+  .buttons {
+    gap: 7px;
+    margin-top: 10px;
+  }
+
+  .btn {
+    padding: 9px 14px;
+    font-size: 15px;
+  }
+
+  .foot {
+    margin-top: 8px;
+    font-size: 11.5px;
+  }
+
+  .tagline {
+    margin: 8px 0 10px;
+    font-size: 13px;
+  }
+
+  .player-card {
+    padding: 8px 10px;
+  }
+
+  .player-card .lvl {
+    min-width: 52px;
+    padding: 4px 6px;
+  }
+
+  .player-card .lvl b {
+    font-size: 26px;
+  }
+
+  /* menu: logo and card on the left, buttons on the right */
+  .screen-menu {
+    justify-items: center;
+    padding-left: calc(var(--sl) + 12px);
+  }
+
+  .panel.menu {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 6px 22px;
+    width: min(700px, 100%);
+  }
+
+  .panel.menu .buttons {
+    margin-top: 0;
+  }
+
+  .panel.menu .foot {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+
+  .logo span {
+    font-size: 18px;
+  }
+
+  .logo b {
+    font-size: 46px;
+  }
+
+  /* setup: rivals on the left, scouting and start on the right */
+  .setup-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  .rivals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .rival {
+    gap: 8px;
+    padding: 5px 8px;
+  }
+
+  .rival .chip {
+    width: 30px;
+    height: 30px;
+    font-size: 15px;
+    border-radius: 7px;
+  }
+
+  .rival .who b {
+    font-size: 12.5px;
+  }
+
+  .rival .who small {
+    display: none;
+  }
+
+  .rival .ovr b {
+    font-size: 16px;
+  }
+
+  .rival small {
+    font-size: 10.5px;
+  }
+
+  .scout {
+    margin-top: 0;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .scout p {
+    margin: 4px 0 6px;
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+
+  .cmp {
+    gap: 3px 10px;
+    font-size: 12px;
+  }
+
+  .setup-side .length {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .setup-side .segs {
+    flex-wrap: nowrap;
+    justify-content: stretch;
+  }
+
+  .setup-side .seg {
+    flex: 1;
+    padding: 8px 4px;
+  }
+
+  /* "Game length · first to" over plain 3 / 5 / 7 */
+  .setup-side .seg-pre {
+    display: none;
+  }
+
+  .setup-side .length > span::after {
+    content: ' · first to';
+  }
+
+  .seg {
+    padding: 7px 12px;
+    font-size: 14px;
+  }
+
+  .length {
+    margin-top: 10px;
+  }
+
+  /* upgrades: stats in two columns */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 22px;
+  }
+
+  .stat {
+    grid-template-columns: minmax(0, 1fr) minmax(40px, 0.8fr) 28px 40px;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .stat-name b {
+    font-size: 15px;
+  }
+
+  .stat-name small {
+    display: none;
+  }
+
+  .stat-val {
+    font-size: 18px;
+  }
+
+  .btn.plus {
+    padding: 4px 0;
+    font-size: 20px;
+  }
+
+  .up-head {
+    margin-bottom: 4px;
+  }
+
+  .derived {
+    margin-top: 6px;
+    padding-top: 8px;
+    font-size: 12.5px;
+  }
+
+  .up-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .up-foot .foot {
+    margin: 10px 0 0;
+    text-align: left;
+  }
+
+  /* how to play: the rules are the one thing long enough to scroll */
+  .how {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .rules {
+    max-height: calc(100vh - 150px);
+    max-height: calc(100dvh - 150px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    padding-right: 8px;
+    padding-bottom: 18px;
+    /* A fade at the foot says there is more below. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+    mask-image: linear-gradient(to bottom, #000 82%, transparent);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .rules li {
+    margin-bottom: 6px;
+  }
+
+  .controls {
+    font-size: 12.5px;
+  }
+
+  .controls td {
+    padding: 5px 0;
+  }
+
+  .how + .buttons {
+    margin-top: 8px;
+  }
+
+  /* settings */
+  .screen-settings .length {
+    margin-top: 10px;
+  }
+
+  /* pause: a 2 x 2 of buttons */
+  .screen-pause .buttons {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* post game: the result on the left, what's next on the right */
+  .post-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .post .result {
+    font-size: 40px;
+  }
+
+  .final {
+    margin: 4px 0 6px;
+    font-size: 15px;
+  }
+
+  .final b {
+    font-size: 20px;
+  }
+
+  .tallies {
+    font-size: 13px;
+  }
+
+  .xp-lines {
+    margin: 8px 0 0;
+    padding: 6px 10px;
+  }
+
+  .xp-lines .row {
+    padding: 1px 0;
+    font-size: 13px;
+  }
+
+  .levelup,
+  .unlock {
+    margin-bottom: 8px;
+    padding: 7px 10px;
+    font-size: 14px;
+  }
+
+  .post-side .buttons {
+    justify-content: flex-start;
+  }
+
+  .post-side .btn {
+    flex: 1 1 40%;
+  }
+
+  /* HUD */
+  .scorebar {
+    top: calc(var(--st) + 8px);
+    border-radius: 10px;
+  }
+
+  .scorebar .side {
+    gap: 7px;
+    padding: 5px 10px;
+  }
+
+  .scorebar .pts {
+    min-width: 26px;
+    font-size: 26px;
+  }
+
+  .scorebar .name {
+    max-width: 90px;
+    font-size: 13px;
+  }
+
+  .scorebar .mid {
+    padding: 4px 10px;
+  }
+
+  .scorebar .to {
+    font-size: 10px;
+  }
+
+  .role {
+    font-size: 11px;
+  }
+
+  .clock {
+    top: calc(var(--st) + 60px);
+  }
+
+  .clock span {
+    font-size: 30px;
+  }
+
+  .clock-track {
+    width: 140px;
+    height: 5px;
+  }
+
+  .touch .tip {
+    top: calc(var(--st) + 62px);
+  }
+
+  .banner {
+    top: 30%;
+  }
+}
+
+/* Very short screens (small phones with the browser bar showing). */
+@media (orientation: landscape) and (max-height: 360px) {
+  .panel {
+    padding: 10px 16px 10px;
+  }
+  .logo b {
+    font-size: 38px;
+  }
+  .btn {
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+  .tagline {
+    display: none;
   }
 }

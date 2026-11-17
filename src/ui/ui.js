@@ -19,13 +19,35 @@ const HINTS = {
   done: `${key('Space')} Next rep`,
 };
 
+// The same hints for the on-screen controls: names of the buttons, not keys.
+const pad = (k) => `<kbd class="pad">${k}</kbd>`;
+const TOUCH_HINTS = {
+  'wr:presnap': `${pad('SNAP')} Snap the ball`,
+  'wr:live': `Run past his shoulder ${pad('CUT')} Juke ${pad('CALL')} Call for it`,
+  'wr:called': `Keep running: he leads you`,
+  'wr:flight': `Get to the ring ${pad('JUMP')} Jump or dive`,
+  'db:presnap': `Set your cushion ${pad('READY')} Ready`,
+  'db:live': `Jam him from in front, ride him from behind`,
+  'db:flight': `Get to the ring ${pad('JUMP')} Swat it, or run through him`,
+  done: `${pad('NEXT')} Next rep`,
+};
+
+const TOUCH_CONTROLS = [
+  ['Move: push a little to jog', 'left stick'],
+  ['Sprint (uses your sprint tank)', `hold ${pad('SPRINT')}`],
+  ['Jump, or dive when it is out of reach', pad('JUMP')],
+  ['Juke / quick break step', `${pad('CUT')} ${pad('CUT')}`],
+  ['Snap before the play, call for the ball after it', pad('CALL')],
+  ['Pause, camera', 'top corners'],
+];
+
 const CONTROLS = [
   ['Move', `${key('W')}${key('A')}${key('S')}${key('D')} or arrow keys`],
   ['Sprint (uses your sprint tank)', `hold ${key('Shift')}`],
   ['Play the ball: jump, or dive when it is out of reach', key('Space')],
   ['Juke / quick break step left, right', `${key('Q')} ${key('E')}`],
   ['Call for the ball (offense), with your right hand', key('Enter')],
-  ['Snap / ready / next rep', key('Space')],
+  ['Snap / ready / next rep', `${key('Space')} or ${key('Enter')}`],
   ['Camera: follow, broadcast or cinematic', key('C')],
   ['Pause, mute', `${key('Esc')} ${key('M')}`],
   ['Lighting and graphics', 'Settings, from the menu or pause'],
@@ -36,6 +58,8 @@ export class UI {
   constructor(root, handlers) {
     this.root = root;
     this.handlers = handlers;
+    this.touch = Boolean(handlers.touch);
+    this.hints = this.touch ? TOUCH_HINTS : HINTS;
     this.screen = null;
     this.backTo = null;
     this.sel = { tier: 1, target: 5 };
@@ -199,9 +223,11 @@ export class UI {
     this.show(
       'menu',
       `<div class="panel menu">
-        <div class="logo"><span>FOOTBALL</span><b>SUPERSTAR</b></div>
-        <p class="tagline">1-on-1s. You against him, both ways. First to the number wins.</p>
-        ${this.playerCard(career)}
+        <div class="menu-head">
+          <div class="logo"><span>FOOTBALL</span><b>SUPERSTAR</b></div>
+          <p class="tagline">1-on-1s. You against him, both ways. First to the number wins.</p>
+          ${this.playerCard(career)}
+        </div>
         <div class="buttons">
           <button class="btn primary" data-action="setup" data-autofocus>Play</button>
           <button class="btn" data-action="upgrades">Upgrades${career.points ? `<span class="badge">${career.points}</span>` : ''}</button>
@@ -209,7 +235,7 @@ export class UI {
           <button class="btn" data-action="settings">Settings</button>
           <button class="btn ghost" data-action="reset">Reset career</button>
         </div>
-        <p class="foot">Arrow keys and Enter, or the mouse.</p>
+        ${this.touch ? '' : '<p class="foot">Arrow keys and Enter, or the mouse.</p>'}
       </div>`
     );
   }
@@ -245,13 +271,15 @@ export class UI {
       .join('');
     const lengths = GAME_LENGTHS.map(
       (n) =>
-        `<button class="seg${n === this.sel.target ? ' on' : ''}" data-action="length" data-target="${n}" aria-pressed="${n === this.sel.target}">First to ${n}</button>`
+        `<button class="seg${n === this.sel.target ? ' on' : ''}" data-action="length" data-target="${n}" aria-pressed="${n === this.sel.target}"><span class="seg-pre">First to </span>${n}</button>`
     ).join('');
     this.show(
       'setup',
       `<div class="panel wide">
         <h2>Pick your rival</h2>
+        <div class="setup-grid">
         <div class="rivals">${cards}</div>
+        <div class="setup-side">
         <div class="scout">
           <div><b>${esc(rival.name)}</b> <em>"${esc(rival.nick)}"</em> · XP x${tierMultiplier(this.sel.tier)}</div>
           <p>${esc(rival.scout)}</p>
@@ -261,6 +289,8 @@ export class UI {
         <div class="buttons row">
           <button class="btn ghost" data-action="back">Back</button>
           <button class="btn primary" data-action="start" data-autofocus>Start game</button>
+        </div>
+        </div>
         </div>
       </div>`
     );
@@ -295,8 +325,10 @@ export class UI {
           <span>Vertical <b>${Math.round(p.jumpHeight * 36)}"</b></span>
           <span>Sprint tank <b>${p.sprintSeconds.toFixed(1)}s</b></span>
         </div>
-        <p class="foot">Win games to level up. Every level is ${POINTS_PER_LEVEL} skill points.</p>
-        <div class="buttons row"><button class="btn primary" data-action="back" ${career.points ? '' : 'data-autofocus'}>Done</button></div>
+        <div class="up-foot">
+          <p class="foot">Win games to level up. Every level is ${POINTS_PER_LEVEL} skill points.</p>
+          <div class="buttons row"><button class="btn primary" data-action="back" ${career.points ? '' : 'data-autofocus'}>Done</button></div>
+        </div>
       </div>`
     );
     const again = focusStat && this.screenEl.querySelector(`[data-stat="${focusStat}"]:not(:disabled)`);
@@ -308,6 +340,10 @@ export class UI {
   showHowTo(backTo = 'menu') {
     this.backTo = backTo;
     this.handlers.seenHowTo?.();
+    const t = this.touch;
+    const callKey = t ? pad('CALL') : key('Enter');
+    const jumpKey = t ? pad('JUMP') : key('Space');
+    const controls = t ? TOUCH_CONTROLS : CONTROLS;
     this.show(
       'howto',
       `<div class="panel wide">
@@ -316,14 +352,14 @@ export class UI {
           <ul class="rules">
             <li><b>Both ways.</b> You and your rival trade off. With the ball you are the receiver; without it you are the corner.</li>
             <li><b>Scoring.</b> A completion is a point for the receiver. An incompletion is a point for the defender. Possession flips after every point.</li>
-            <li><b>Offense is freestyle.</b> No plays. Run anything, then press ${key('Enter')} to call for the ball. The QB leads you from your speed and direction, so call it coming out of your break.</li>
+            <li><b>Offense is freestyle.</b> No plays. Run anything, then ${t ? 'tap' : 'press'} ${callKey} to call for the ball. The QB leads you from your speed and direction, so call it coming out of your break.</li>
             <li><b>${QB.deadline}-second pressure.</b> Nobody calls for it in ${QB.deadline} seconds? The QB throws anyway.</li>
-            <li><b>The ring.</b> A yellow ring shows where the ball comes down. A white ring closes on it as the ball arrives: be there and press ${key('Space')}. Too far away to jump for it? ${key('Space')} lays you out in a dive instead.</li>
+            <li><b>The ring.</b> A yellow ring shows where the ball comes down. A white ring closes on it as the ball arrives: be there and ${t ? 'tap' : 'press'} ${jumpKey}. Too far away to jump for it? ${jumpKey} lays you out in a dive instead.</li>
             <li><b>Hands.</b> Get within arm's reach and the hands come up on their own. A corner squared up in front of the receiver jams him: a punch to the chest, then hands that hold him up while he fights to a shoulder. A corner who is beaten or trailing and runs into the receiver stays on him and rides him, which costs the receiver speed and footwork. Strength decides who wins it, and a juke is the quickest way out. Contact never makes anybody faster.</li>
             <li><b>It is physical.</b> A ball off the hands can pop up and stay live: the ring turns orange and anybody can come down with it. And a catch is not safe until it is finished. A defender who arrives with the ball can jar it loose, so on defense, run through the receiver. A hit costs balance: you stumble, and a big enough one puts you on the turf.</li>
             <li><b>Level up.</b> Every game earns XP. Spend skill points on stats that work on both sides of the ball.</li>
           </ul>
-          <table class="controls">${CONTROLS.map(([a, k]) => `<tr><td>${a}</td><td>${k}</td></tr>`).join('')}</table>
+          <table class="controls">${controls.map(([a, k]) => `<tr><td>${a}</td><td>${k}</td></tr>`).join('')}</table>
         </div>
         <div class="buttons row"><button class="btn primary" data-action="back" data-autofocus>Got it</button></div>
       </div>`
@@ -335,7 +371,8 @@ export class UI {
     const row = (label, key, options) =>
       `<div class="length"><span>${label}</span><div class="segs">${options
         .map(([value, text]) => {
-          const on = career.settings[key] === value;
+          const current = key === 'sound' ? (career.settings.muted ? 'off' : 'on') : career.settings[key];
+          const on = current === value;
           return `<button class="seg${on ? ' on' : ''}" data-action="set" data-key="${key}" data-value="${value}" aria-pressed="${on}">${text}</button>`;
         })
         .join('')}</div></div>`;
@@ -353,6 +390,10 @@ export class UI {
           ['low', 'Low'],
           ['medium', 'Medium'],
           ['high', 'High'],
+        ])}
+        ${row('Sound', 'sound', [
+          ['on', 'On'],
+          ['off', 'Off'],
         ])}
         <p class="foot">Auto starts from what your graphics chip can do and lowers the picture if the game is not running smoothly.</p>
         <div class="buttons row"><button class="btn primary" data-action="back" ${focusSelector ? '' : 'data-autofocus'}>Done</button></div>
@@ -400,6 +441,8 @@ export class UI {
     this.show(
       'postgame',
       `<div class="panel wide post ${won ? 'won' : 'lost'}">
+        <div class="post-grid">
+        <div class="post-main">
         <div class="result">${won ? 'YOU WIN' : 'YOU LOSE'}</div>
         <div class="final">You <b>${score.user}</b> - <b>${score.rival}</b> ${esc(rival.name)} <small>first to ${target}</small></div>
         <div class="tallies">
@@ -408,6 +451,8 @@ export class UI {
           <span>Picks <b>${summary.picks}</b></span>
         </div>
         <div class="xp-lines">${lines}<div class="row total"><span>Total</span><b>+${reward.xp.total} XP</b></div></div>
+        </div>
+        <div class="post-side">
         ${
           reward.levels
             ? `<div class="levelup">LEVEL UP! You are level ${career.level}. <b>+${reward.pointsGained} skill points</b></div>`
@@ -420,6 +465,8 @@ export class UI {
           ${canNext ? `<button class="btn${career.points ? '' : ' primary'}" data-action="next" ${career.points ? '' : 'data-autofocus'}>Next rival</button>` : ''}
           <button class="btn${career.points || canNext ? '' : ' primary'}" data-action="rematch" ${career.points || canNext ? '' : 'data-autofocus'}>Rematch</button>
           <button class="btn ghost" data-action="menu">Menu</button>
+        </div>
+        </div>
         </div>
       </div>`
     );
@@ -480,7 +527,7 @@ export class UI {
     if (hintKey === 'wr:live' && s.called) hintKey = 'wr:called';
     if (hintKey !== this.lastHint) {
       this.lastHint = hintKey;
-      h.hints.innerHTML = HINTS[hintKey] || '';
+      h.hints.innerHTML = this.hints[hintKey] || '';
     }
 
     const a = s.arrow;

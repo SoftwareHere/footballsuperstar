@@ -38,6 +38,21 @@ Then open the address Vite prints (http://localhost:5173 by default).
 `?quality=low|medium|high|auto` and `?lighting=golden|night|midday` in the
 address override the saved settings.
 
+**On a phone or tablet** the game plays in landscape: hold the phone
+sideways and the menu opens (on Android it also goes full screen on your first
+tap). In a game:
+
+- **Left stick** (bottom left) moves you. A small push is a jog.
+- **Jump**: jump, or dive when the ball is out of reach.
+- **Sprint**: hold it to sprint.
+- **Cut** left and right: the juke / quick break step.
+- **Call**: snap the ball before the play (or "ready" on defense), call for
+  the ball after it, and skip to the next rep once a rep is over.
+- The top corners hold **pause** and **camera**. Sound is under Settings.
+
+Turning the phone upright pauses the game. `?touch=1` in the address forces
+the touch controls on a desktop browser, and `?touch=0` turns them off.
+
 To make a static build you can host anywhere:
 
 ```bash
@@ -128,7 +143,7 @@ The same keys work in both roles, and up-screen is always downfield.
 | Play the ball: jump, or dive when it is out of reach | `Space` |
 | Juke / quick break step, left and right | `Q` / `E` |
 | Call for the ball (offense) | `Enter` |
-| Snap, ready, next rep | `Space` |
+| Snap, ready, next rep | `Space` or `Enter` |
 | Camera: follow, broadcast or cinematic | `C` |
 | Pause | `Esc` or `P` |
 | Mute | `M` |

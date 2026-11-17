@@ -1,6 +1,7 @@
 import { SIM_DT, REP, CAMERA_MODES, LIGHTING_MODES, GRAPHICS_MODES } from './config.js';
 import { RNG } from './core/rng.js';
 import { Input } from './core/input.js';
+import { isMobile, isLandscape, onOrientation, tryLockLandscape } from './core/device.js';
 import { Match } from './sim/match.js';
 import { ReceiverAI } from './sim/receiverAI.js';
 import { DefenderAI } from './sim/defenderAI.js';
@@ -11,8 +12,9 @@ import { loadCareer, saveCareer, resetCareer } from './progression/save.js';
 import { SceneView } from './render/scene.js';
 import { Sfx } from './audio/sfx.js';
 import { UI } from './ui/ui.js';
+import { TouchControls } from './ui/touch.js';
 
-/** Turns the keyboard into an athlete's intent. Same keys in both roles. */
+/** Turns the keyboard or touch controls into an athlete's intent. Same controls in both roles. */
 class UserController {
   constructor(input, role) {
     this.input = input;
@@ -23,16 +25,23 @@ class UserController {
   update(rep) {
     const i = this.input;
     const out = this.intent;
-    out.x = (i.held('right') ? 1 : 0) - (i.held('left') ? 1 : 0);
-    out.z = (i.held('down') ? 1 : 0) - (i.held('up') ? 1 : 0); // up-screen is downfield (-z)
+    if (i.axis.active) {
+      // The touch joystick is analog: a gentle push is a jog.
+      out.x = i.axis.x;
+      out.z = i.axis.z;
+    } else {
+      out.x = (i.held('right') ? 1 : 0) - (i.held('left') ? 1 : 0);
+      out.z = (i.held('down') ? 1 : 0) - (i.held('up') ? 1 : 0); // up-screen is downfield (-z)
+    }
     out.sprint = i.held('sprint');
     out.jump = false;
     out.snap = false;
     out.call = false;
     out.juke = 0;
     if (rep.phase === 'presnap') {
-      out.snap = i.take('action');
-      i.take('call');
+      // Calling for the ball doubles as the snap (or "ready" on defense).
+      const snap = i.take('action');
+      out.snap = i.take('call') || snap;
       i.take('jukeL');
       i.take('jukeR');
     } else {
@@ -97,8 +106,10 @@ export class Game {
     this.role = 'wr';
     this.was = { wr: { x: 0, y: 0, z: 0, facing: 0 }, db: { x: 0, y: 0, z: 0, facing: 0 }, ball: { x: 0, y: 0, z: 0 }, qb: { z: 0 } };
     this.seed = Number(query.get('seed')) || null;
+    this.mobile = isMobile();
 
     this.ui = new UI(uiRoot, {
+      touch: this.mobile,
       career: () => this.career,
       start: (tier, target) => this.startMatch(tier, target),
       spend: (stat) => this.spend(stat),
@@ -124,12 +135,49 @@ export class Game {
       if (document.hidden && this.state === 'match' && !this.paused) this.setPaused(true);
     });
 
-    if (this.career.seenHowTo) this.ui.showMenu(this.career);
-    else this.ui.showHowTo('menu');
+    if (this.mobile) this.setupMobile(uiRoot);
+    else this.openMenu();
 
     this.last = performance.now();
     this.frame = this.frame.bind(this);
     requestAnimationFrame(this.frame);
+  }
+
+  openMenu() {
+    if (this.career.seenHowTo) this.ui.showMenu(this.career);
+    else this.ui.showHowTo('menu');
+  }
+
+  /**
+   * Phones and tablets: on-screen controls, and the game only runs sideways.
+   * The menu waits until the device is in landscape; turning it upright in a
+   * game pauses it.
+   */
+  setupMobile(uiRoot) {
+    document.documentElement.classList.add('touch');
+    this.touch = new TouchControls(uiRoot, this.input, (name) => this.command(name));
+    const rotate = document.createElement('div');
+    rotate.className = 'rotate';
+    rotate.innerHTML = `<div class="rotate-card"><div class="rotate-phone"><i></i></div>
+      <b>Turn your phone sideways</b><span>Football Superstar plays in landscape.</span></div>`;
+    document.body.appendChild(rotate);
+    this.rotateEl = rotate;
+    let started = false;
+    const apply = (landscape) => {
+      rotate.hidden = landscape;
+      document.documentElement.classList.toggle('portrait', !landscape);
+      if (!landscape && this.state === 'match' && !this.paused) this.setPaused(true);
+      if (landscape && !started) {
+        started = true;
+        this.openMenu();
+      }
+      // The picture follows the new shape once the browser has settled.
+      setTimeout(() => this.view.resize(), 250);
+    };
+    apply(isLandscape());
+    onOrientation(apply);
+    // The first tap asks for full screen and a landscape lock where the browser allows it.
+    window.addEventListener('pointerdown', () => tryLockLandscape(), { once: true });
   }
 
   // ------------------------------------------------------------- commands
@@ -137,9 +185,7 @@ export class Game {
   command(name) {
     if (name === 'mute') {
       const muted = !this.career.settings.muted;
-      this.career.settings.muted = muted;
-      this.sfx.setMuted(muted);
-      saveCareer(this.career);
+      this.setMuted(muted);
       if (this.state === 'match' && !this.paused) this.ui.banner(muted ? 'SOUND OFF' : 'SOUND ON', '', 'small', 0.9);
       return true;
     }
@@ -161,6 +207,12 @@ export class Game {
     return false;
   }
 
+  setMuted(muted) {
+    this.career.settings.muted = muted;
+    this.sfx.setMuted(muted);
+    saveCareer(this.career);
+  }
+
   setPaused(paused) {
     if (this.state !== 'match') return;
     this.paused = paused;
@@ -176,8 +228,9 @@ export class Game {
     return true;
   }
 
-  /** A picture setting changed: lighting or graphics. Applied at once, behind the menu. */
+  /** A setting changed: lighting, graphics or sound. Applied at once, behind the menu. */
   setting(key, value) {
+    if (key === 'sound') return this.setMuted(value === 'off');
     if (key === 'lighting' && LIGHTING_MODES.includes(value)) {
       this.career.settings.lighting = value;
       this.view.setLighting(value);
@@ -387,7 +440,9 @@ export class Game {
       this.input.clearPresses();
       this.showResult(this.match.recordResult());
     }
-    const skip = rep.tDone >= REP.minLinger && this.input.take('action');
+    // A tap that was meant for the play (a late jump) must not skip the result.
+    if (rep.tDone < REP.minLinger) this.input.clearPresses();
+    const skip = rep.tDone >= REP.minLinger && (this.input.take('action') || this.input.take('call'));
     if (rep.tDone >= REP.resultLinger || skip) {
       if (this.match.winner) this.endMatch();
       else this.beginRep();
@@ -480,6 +535,7 @@ export class Game {
       this.ui.root.classList.toggle('cinematic', cinematic);
     }
     this.ui.tick(real);
+    this.touch?.setVisible(this.state === 'match' && !this.paused);
     // Only judge the frame rate while a game is being played; the menus are
     // drawn at 30 frames a second to save power, and a paused game only when
     // something on screen changed.
@@ -502,6 +558,7 @@ export class Game {
       if (!p.visible) arrow = p;
     }
     this.view.setScore(this.match.score.user, this.match.score.rival, this.rival.name.split(' ')[1], this.match.target);
+    this.touch?.update({ role: this.role, phase: rep.phase, called: rep.called });
     this.ui.updateHud({
       score: this.match.score,
       target: this.match.target,
