@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "e2e": "node tests/e2e/smoke.cjs",
+    "e2e:mobile": "node tests/e2e/mobile.cjs",
     "perf": "node tests/e2e/perf.cjs"
   },
   "dependencies": {
