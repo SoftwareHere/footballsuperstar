@@ -36,6 +36,7 @@ export class CameraRig {
     this.shakeAmount = 0;
     this.shakeTime = 0;
     this.offset = new THREE.Vector3(); // camera minus player, for the lock camera (and its tests)
+    this.spot = new THREE.Vector3();
   }
 
   /** Jump straight to the next target instead of easing (new rep, mode change). */
@@ -71,7 +72,7 @@ export class CameraRig {
     if (mode === 'broadcast') {
       this.wantPos.set(focus.x * 0.3, 25, focus.z * 0.55 + 25);
       this.wantLook.set(focus.x * 0.55, 0, focus.z * 0.6 - 8);
-      if (flight) this.wantLook.lerp(new THREE.Vector3(ball.target.x, 0, ball.target.z), 0.35);
+      if (flight) this.wantLook.lerp(this.spot.set(ball.target.x, 0, ball.target.z), 0.35);
     } else {
       let back = 9.5;
       let height = 5.0;

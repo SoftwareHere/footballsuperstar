@@ -29,6 +29,7 @@ export class Effects {
     this.life = new Float32Array(MAX);
     this.colors = new Float32Array(MAX * 3);
     this.next = 0;
+    this.blobStrength = 1; // lighter when the sun casts real shadows: then it is only contact shade
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
@@ -78,9 +79,9 @@ export class Effects {
     const b = this.blobs[i];
     b.visible = true;
     b.position.set(x, 0.022, z);
-    const s = size * (1 + height * 0.35);
+    const s = size * (1 + height * 0.35) * (this.blobStrength < 1 ? 0.8 : 1);
     b.scale.set(s, s, 1);
-    b.material.opacity = Math.max(0.15, 0.8 - height * 0.5);
+    b.material.opacity = Math.max(0.15, 0.8 - height * 0.5) * this.blobStrength;
   }
 
   hideBlobs() {

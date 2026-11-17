@@ -24,7 +24,7 @@ export function newCareer() {
     losses: 0,
     beaten: {}, // rival id -> number of wins
     seenHowTo: false,
-    settings: { target: 5, camera: 'follow', muted: false, tier: 1 },
+    settings: { target: 5, camera: 'follow', muted: false, tier: 1, lighting: 'golden', graphics: 'auto' },
   };
 }
 

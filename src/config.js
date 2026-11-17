@@ -45,6 +45,8 @@ export const GAME_LENGTHS = [3, 5, 7];
 
 // 'lock' is the cinematic camera: bolted to the player, always facing the end zone.
 export const CAMERA_MODES = ['follow', 'broadcast', 'lock'];
+export const LIGHTING_MODES = ['golden', 'night', 'midday'];
+export const GRAPHICS_MODES = ['auto', 'low', 'medium', 'high'];
 
 // Laying out for a ball that is coming down out of reach.
 export const DIVE = {

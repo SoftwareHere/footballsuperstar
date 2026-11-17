@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "node tests/e2e/smoke.cjs"
+    "e2e": "node tests/e2e/smoke.cjs",
+    "perf": "node tests/e2e/perf.cjs"
   },
   "dependencies": {
     "three": "^0.187.0"

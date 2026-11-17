@@ -1,79 +1,128 @@
 import * as THREE from 'three';
+import { makeCanvas, tileNoise, canvasTexture } from './textures.js';
 
-/** Direction to the sun: late afternoon, behind and to the right of the offense. */
-export const SUN_DIR = new THREE.Vector3(0.56, 0.6, 0.57).normalize();
-
-/**
- * A painted sky as an equirectangular texture: gradient, haze on the horizon,
- * the sun's glow and some cloud. It is both the backdrop and what shiny
- * things (helmets) reflect.
- */
-export function createSkyTexture() {
-  const W = 2048;
-  const H = 1024;
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
+/** Cloud noise: three octave bands in r, g and b of one small tiling texture. */
+function cloudNoise() {
+  const size = 256;
+  const bands = [tileNoise(size, 4, 4, 3, 101), tileNoise(size, 8, 8, 3, 202), tileNoise(size, 16, 16, 2, 303)];
+  const canvas = makeCanvas(size);
   const g = canvas.getContext('2d');
+  const img = g.createImageData(size, size);
+  for (let i = 0; i < size * size; i++) {
+    img.data[i * 4] = bands[0][i] * 255;
+    img.data[i * 4 + 1] = bands[1][i] * 255;
+    img.data[i * 4 + 2] = bands[2][i] * 255;
+    img.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return canvasTexture(canvas, { srgb: false, repeat: true, anisotropy: 1 });
+}
 
-  const grad = g.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, '#16407f');
-  grad.addColorStop(0.28, '#2f6fbe');
-  grad.addColorStop(0.43, '#79aee0');
-  grad.addColorStop(0.495, '#d9e6ee');
-  grad.addColorStop(0.5, '#e8e4d8');
-  grad.addColorStop(0.52, '#5d7a5c');
-  grad.addColorStop(1, '#27402b');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, W, H);
+const vertexShader = /* glsl */ `
+  varying vec3 vDir;
+  void main() {
+    vDir = position;
+    // Rotation only, pinned to the far plane: the sky is infinitely far away
+    // and is only drawn where nothing else is.
+    vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);
+    gl_Position = p.xyww;
+  }
+`;
 
-  // Where the sun sits on the map.
-  const u = Math.atan2(SUN_DIR.z, SUN_DIR.x) / (Math.PI * 2) + 0.5;
-  const v = Math.asin(SUN_DIR.y) / Math.PI + 0.5;
-  const sx = u * W;
-  const sy = (1 - v) * H;
-  for (const dx of [-W, 0, W]) {
-    const glow = g.createRadialGradient(sx + dx, sy, 0, sx + dx, sy, H * 0.55);
-    glow.addColorStop(0, 'rgba(255,246,214,0.95)');
-    glow.addColorStop(0.035, 'rgba(255,238,190,0.7)');
-    glow.addColorStop(0.16, 'rgba(255,226,170,0.22)');
-    glow.addColorStop(1, 'rgba(255,220,160,0)');
-    g.fillStyle = glow;
-    g.fillRect(0, 0, W, H * 0.52);
+const fragmentShader = /* glsl */ `
+  uniform vec3 uSunDir, uZenith, uHorizon, uGround, uSun, uCloudLit, uCloudShade;
+  uniform float uSunSize, uGlow, uClouds, uStars, uTime;
+  uniform sampler2D uNoise;
+  varying vec3 vDir;
+
+  float hash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
   }
 
-  // Clouds: soft blobs strung into banks, flatter toward the horizon.
-  const rand = (() => {
-    let s = 7;
-    return () => ((s = (s * 16807) % 2147483647) - 1) / 2147483646;
-  })();
-  for (let bank = 0; bank < 26; bank++) {
-    const cx = rand() * W;
-    const cy = H * (0.2 + rand() * 0.26);
-    const flat = 0.35 + (cy / (H * 0.5)) * 0.25;
-    const size = 40 + rand() * 90;
-    for (let i = 0; i < 16; i++) {
-      const x = cx + (rand() - 0.5) * size * 5;
-      const y = cy + (rand() - 0.5) * size * 0.7;
-      const r = size * (0.5 + rand() * 0.7);
-      for (const dx of [-W, 0, W]) {
-        const c = g.createRadialGradient(x + dx, y, 0, x + dx, y, r);
-        c.addColorStop(0, 'rgba(255,255,255,0.2)');
-        c.addColorStop(0.6, 'rgba(250,246,240,0.08)');
-        c.addColorStop(1, 'rgba(255,255,255,0)');
-        g.fillStyle = c;
-        g.save();
-        g.translate(x + dx, y);
-        g.scale(1, flat);
-        g.translate(-(x + dx), -y);
-        g.fillRect(x + dx - r, y - r, r * 2, r * 2);
-        g.restore();
-      }
+  void main() {
+    vec3 d = normalize(vDir);
+    float h = d.y;
+    float up = clamp(h, 0.0, 1.0);
+    // Deep overhead, pale and hazy toward the horizon.
+    vec3 sky = mix(uHorizon, uZenith, pow(up, 0.42));
+    float mu = dot(d, uSunDir);
+    float m = max(mu, 0.0);
+    // Light scattered around the sun, strongest low in the sky.
+    vec3 glow = uSun * (pow(m, 6.0) * 0.35 + pow(m, 48.0) * 0.9) * uGlow;
+    sky += glow * (1.0 - up * 0.6);
+    // A warm band where the sun is near the horizon.
+    sky += uSun * uGlow * 0.18 * pow(1.0 - up, 6.0) * (0.4 + 0.6 * m);
+
+    if (h > 0.0 && uClouds > 0.0) {
+      vec2 uv = d.xz / (h + 0.08) * 0.11 + vec2(uTime * 0.0018, uTime * 0.0007);
+      float n = texture2D(uNoise, uv).r * 0.58 + texture2D(uNoise, uv * 2.3 + 0.31).g * 0.3 + texture2D(uNoise, uv * 5.7 + 0.77).b * 0.12;
+      float cover = smoothstep(1.0 - uClouds, 1.0 - uClouds + 0.28, n) * smoothstep(0.0, 0.12, h);
+      float thick = smoothstep(0.45, 1.0, n);
+      vec3 cloud = mix(uCloudLit, uCloudShade, thick * 0.8);
+      cloud += uSun * uGlow * pow(m, 5.0) * (1.0 - thick) * 0.9; // silver lining
+      cloud = mix(cloud, uHorizon, pow(1.0 - up, 4.0) * 0.7); // far clouds sink into the haze
+      sky = mix(sky, cloud, cover * 0.92);
     }
-  }
 
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  return tex;
+    // The sun (or the moon) itself: very bright, so it blooms.
+    float disc = smoothstep(uSunSize, uSunSize + (1.0 - uSunSize) * 0.4, mu);
+    sky += uSun * disc * 24.0;
+
+    if (uStars > 0.0 && h > 0.0) {
+      vec3 cell = floor(d * 380.0);
+      float s = hash(cell);
+      float star = step(0.9975, s) * smoothstep(0.02, 0.25, h);
+      sky += vec3(0.75, 0.82, 1.0) * star * (s - 0.9975) * 900.0 * uStars;
+    }
+
+    // Below the horizon: the ground beyond the stadium, lost in haze.
+    sky = mix(sky, mix(uHorizon, uGround, 0.75), smoothstep(0.0, -0.06, h));
+    gl_FragColor = vec4(sky, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
+/** The sky: drawn per pixel, so it is sharp at any resolution and costs nothing to keep. */
+export function createSky() {
+  const uniforms = {
+    uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+    uZenith: { value: new THREE.Color() },
+    uHorizon: { value: new THREE.Color() },
+    uGround: { value: new THREE.Color() },
+    uSun: { value: new THREE.Color() },
+    uCloudLit: { value: new THREE.Color() },
+    uCloudShade: { value: new THREE.Color() },
+    uSunSize: { value: 0.9995 },
+    uGlow: { value: 1 },
+    uClouds: { value: 0.4 },
+    uStars: { value: 0 },
+    uTime: { value: 0 },
+    uNoise: { value: cloudNoise() },
+  };
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(10, 32, 16),
+    new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader, side: THREE.BackSide, depthWrite: false, fog: false })
+  );
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 1000; // after the opaque scene, so it only fills the gaps
+  mesh.matrixAutoUpdate = false;
+
+  /** Apply a lighting preset's sky. `dir` is the sun (or moon) direction. */
+  const set = (s, dir) => {
+    uniforms.uSunDir.value.set(dir[0], dir[1], dir[2]).normalize();
+    uniforms.uZenith.value.setHex(s.zenith);
+    uniforms.uHorizon.value.setHex(s.horizon);
+    uniforms.uGround.value.setHex(s.ground);
+    uniforms.uSun.value.setHex(s.sun);
+    uniforms.uCloudLit.value.setHex(s.cloudLit);
+    uniforms.uCloudShade.value.setHex(s.cloudShade);
+    uniforms.uSunSize.value = s.sunSize;
+    uniforms.uGlow.value = s.glow;
+    uniforms.uClouds.value = s.clouds;
+    uniforms.uStars.value = s.stars;
+  };
+  return { mesh, set, uniforms };
 }

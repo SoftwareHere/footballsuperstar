@@ -28,6 +28,7 @@ const CONTROLS = [
   ['Snap / ready / next rep', key('Space')],
   ['Camera: follow, broadcast or cinematic', key('C')],
   ['Pause, mute', `${key('Esc')} ${key('M')}`],
+  ['Lighting and graphics', 'Settings, from the menu or pause'],
 ];
 
 /** All DOM: menus, HUD, banners. The game calls in; clicks call back out. */
@@ -133,6 +134,11 @@ export class UI {
         return this.showUpgrades(career, this.screen === 'postgame' ? 'postgame' : 'menu');
       case 'howto':
         return this.showHowTo(this.screen === 'pause' ? 'pause' : 'menu');
+      case 'settings':
+        return this.showSettings(career, this.screen === 'pause' ? 'pause' : 'menu');
+      case 'set':
+        h.setting?.(data.key, data.value);
+        return this.showSettings(h.career(), this.backTo, `[data-key="${data.key}"][data-value="${data.value}"]`);
       case 'reset':
         return this.showConfirmReset();
       case 'reset-yes':
@@ -200,6 +206,7 @@ export class UI {
           <button class="btn primary" data-action="setup" data-autofocus>Play</button>
           <button class="btn" data-action="upgrades">Upgrades${career.points ? `<span class="badge">${career.points}</span>` : ''}</button>
           <button class="btn" data-action="howto">How to play</button>
+          <button class="btn" data-action="settings">Settings</button>
           <button class="btn ghost" data-action="reset">Reset career</button>
         </div>
         <p class="foot">Arrow keys and Enter, or the mouse.</p>
@@ -323,6 +330,37 @@ export class UI {
     );
   }
 
+  showSettings(career, backTo = 'menu', focusSelector = null) {
+    this.backTo = backTo;
+    const row = (label, key, options) =>
+      `<div class="length"><span>${label}</span><div class="segs">${options
+        .map(([value, text]) => {
+          const on = career.settings[key] === value;
+          return `<button class="seg${on ? ' on' : ''}" data-action="set" data-key="${key}" data-value="${value}" aria-pressed="${on}">${text}</button>`;
+        })
+        .join('')}</div></div>`;
+    this.show(
+      'settings',
+      `<div class="panel">
+        <h2>Settings</h2>
+        ${row('Lighting', 'lighting', [
+          ['golden', 'Golden hour'],
+          ['night', 'Night'],
+          ['midday', 'Midday'],
+        ])}
+        ${row('Graphics', 'graphics', [
+          ['auto', 'Auto'],
+          ['low', 'Low'],
+          ['medium', 'Medium'],
+          ['high', 'High'],
+        ])}
+        <p class="foot">Auto starts from what your graphics chip can do and lowers the picture if the game is not running smoothly.</p>
+        <div class="buttons row"><button class="btn primary" data-action="back" ${focusSelector ? '' : 'data-autofocus'}>Done</button></div>
+      </div>`
+    );
+    if (focusSelector) this.screenEl.querySelector(focusSelector)?.focus({ preventScroll: true });
+  }
+
   showConfirmReset() {
     this.backTo = 'menu';
     this.show(
@@ -346,6 +384,7 @@ export class UI {
         <div class="buttons">
           <button class="btn primary" data-action="resume" data-autofocus>Resume</button>
           <button class="btn" data-action="howto">How to play</button>
+          <button class="btn" data-action="settings">Settings</button>
           <button class="btn ghost" data-action="quit">Quit to menu</button>
         </div>
         <p class="foot">Quitting ends this game with no XP.</p>

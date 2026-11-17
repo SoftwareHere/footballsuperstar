@@ -80,4 +80,8 @@ describe('save', () => {
     expect(saveCareer(newCareer(), broken)).toBe(false);
     expect(resetCareer(broken)).toEqual(newCareer());
   });
+  it('keeps valid picture settings and drops unknown ones', () => {
+    expect(sanitize({ settings: { lighting: 'night', graphics: 'low' } }).settings).toMatchObject({ lighting: 'night', graphics: 'low' });
+    expect(sanitize({ settings: { lighting: 'dusk', graphics: 'ultra' } }).settings).toMatchObject({ lighting: 'golden', graphics: 'auto' });
+  });
 });
