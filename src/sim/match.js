@@ -1,12 +1,24 @@
+import { SCORING } from '../config.js';
 import { Rep } from './rep.js';
 import { deriveParams } from './ratings.js';
 
 /**
- * A game of 1-on-1s, first to `target` points.
+ * Who a finished rep scores for ('wr' or 'db') and how much: a catch is 1
+ * and a touchdown 3 for the receiver; an incompletion is 1 and an
+ * interception 3 for the defender.
+ */
+export function scoreFor(result) {
+  if (result.complete) return { role: 'wr', points: result.touchdown ? SCORING.touchdown : SCORING.catch };
+  return { role: 'db', points: result.reason === 'int' ? SCORING.interception : SCORING.stop };
+}
+
+/**
+ * A game of 1-on-1s, first to `target` points (a 3-point play can carry a
+ * side past it).
  *
- * Whoever is on offense plays receiver. A completion is a point for the
- * receiver, an incompletion is a point for the defender, and possession
- * flips after every point.
+ * Whoever is on offense plays receiver. A catch is a point for the receiver
+ * and a touchdown three; an incompletion is a point for the defender and an
+ * interception three. Possession flips after every rep.
  */
 export class Match {
   constructor({ target, user, rival, rng, firstPossession = null }) {
@@ -51,8 +63,9 @@ export class Match {
     const result = rep.result;
     const offense = this.possession;
     const defense = offense === 'user' ? 'rival' : 'user';
-    const scorer = result.complete ? offense : defense;
-    this.score[scorer] += 1;
+    const { role, points } = scoreFor(result);
+    const scorer = role === 'wr' ? offense : defense;
+    this.score[scorer] += points;
 
     // Carry fatigue into the next rep, with a breather in between.
     const tired = { [offense]: rep.wr, [defense]: rep.db };
@@ -61,7 +74,7 @@ export class Match {
       this.stamina[who] = Math.min(1, tired[who].stamina + rest);
     }
 
-    const entry = { offense, scorer, userRole: this.userRole, ...result };
+    const entry = { offense, scorer, points, userRole: this.userRole, ...result };
     this.history.push(entry);
     if (this.score[scorer] >= this.target) this.winner = scorer;
     this.possession = defense;
@@ -84,15 +97,17 @@ export class Match {
 
   /** Per-role tallies for the post-game screen. */
   summary() {
-    const s = { catches: 0, targets: 0, stops: 0, defended: 0, picks: 0 };
+    const s = { catches: 0, targets: 0, touchdowns: 0, stops: 0, defended: 0, picks: 0, tackles: 0 };
     for (const h of this.history) {
       if (h.userRole === 'wr') {
         s.targets += 1;
         if (h.complete) s.catches += 1;
+        if (h.touchdown) s.touchdowns += 1;
       } else {
         s.defended += 1;
         if (!h.complete) s.stops += 1;
         if (h.reason === 'int') s.picks += 1;
+        if (h.complete && ['wrap', 'hit', 'dive', 'pushed'].includes(h.endedBy)) s.tackles += 1;
       }
     }
     return s;

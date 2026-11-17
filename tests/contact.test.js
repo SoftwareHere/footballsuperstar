@@ -250,10 +250,13 @@ describe('hits', () => {
     rep.wr.hasBall = true;
     rep.ball.attachTo(rep.wr);
     rep.resolveHit(contact(4.4)); // used to be an automatic knockdown
-    expect(rep.result).not.toBe(null);
+    // He held on and kept his feet: the catch is made and he is running with it.
+    expect(rep.result).toBe(null);
+    expect(rep.phase).toBe('run');
     expect(rep.wr.down).toBe(false);
     expect(rep.wr.stumbling).toBeGreaterThan(0);
-    expect(rep.result.knockedDown).toBe(false);
+    expect(rep.run.info.knockedDown).toBe(false);
+    expect(rep.run.info.throughContact).toBe(true);
     const hit = rep.events.find((e) => e.type === 'hit');
     expect(hit.down).toBe(false);
 
@@ -265,6 +268,9 @@ describe('hits', () => {
     big.resolveHit(contact(8));
     expect(big.wr.down).toBe(true);
     expect(big.result.knockedDown).toBe(true);
+    // Knocked down holding on to it: a catch, and he is down where he made it.
+    if (big.result.complete) expect(big.result.endedBy).toBe('hit');
+    else expect(big.result.reason).toBe('hit');
     expect(big.events.find((e) => e.type === 'hit').down).toBe(true);
     expect(CONTACT.downTime).toBeGreaterThan(0);
   });

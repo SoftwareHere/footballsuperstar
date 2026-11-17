@@ -13,10 +13,10 @@ export const STAT_KEYS = [
 export const STAT_INFO = {
   speed: { label: 'Speed', blurb: 'Top speed. Run past him, or keep up with him.' },
   acceleration: { label: 'Acceleration', blurb: 'How fast you reach top speed off the line and out of breaks.' },
-  agility: { label: 'Agility', blurb: 'Sharper cuts and jukes, tighter mirroring on defense, and better balance through contact.' },
-  hands: { label: 'Hands', blurb: 'Secure catches in traffic. On defense: more breakups and picks.' },
-  jumping: { label: 'Jumping', blurb: 'Higher reach on jump balls, both ways.' },
-  strength: { label: 'Strength', blurb: 'Win the hand fight: jam him, ride him, or drive through it. Stay on your feet through a hit, win 50/50 balls.' },
+  agility: { label: 'Agility', blurb: 'Sharper cuts and jukes, tighter mirroring, better balance, making tacklers miss, and toes down on the sideline.' },
+  hands: { label: 'Hands', blurb: 'Secure catches in traffic and on the sideline. On defense: more breakups and picks, and a surer wrap-up.' },
+  jumping: { label: 'Jumping', blurb: 'Higher reach on jump balls, both ways, and a bigger high-point when it is contested.' },
+  strength: { label: 'Strength', blurb: 'Win the hand fight, stay up through a hit, win 50/50 balls, bring a runner down and break tackles.' },
   stamina: { label: 'Stamina', blurb: 'A bigger sprint tank that refills faster between reps.' },
 };
 
@@ -57,6 +57,12 @@ export function deriveParams(ratings) {
     sprintSeconds: 4.0 + 5.0 * sm, // length of a full sprint tank
     staminaRegen: 0.1 + 0.1 * sm, // tank fraction per second while not sprinting
     betweenReps: 0.5 + 0.35 * sm, // tank fraction recovered between reps
+    // 0..1 composites (a rating of 40 is 0, 99 is 1):
+    bodyControl: clamp(0.6 * g + 0.4 * h, 0, 1), // feet down on the sideline, how the ball is played in the air
+    tackling: clamp(0.55 * st + 0.3 * g + 0.15 * h, 0, 1), // bringing a runner down
+    elusive: clamp(0.55 * g + 0.45 * st, 0, 1), // making a tackler miss, breaking his grip
+    layout: clamp(0.55 * g + 0.45 * s, 0, 1), // a contested ball: laying out for it...
+    highPoint: clamp(0.6 * j + 0.4 * st, 0, 1), // ...or going up over him
     hands: ratings.hands,
     jumping: ratings.jumping,
     strengthRating: ratings.strength,

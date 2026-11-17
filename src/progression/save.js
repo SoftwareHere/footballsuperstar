@@ -5,6 +5,7 @@ import { newCareer, SAVE_VERSION, MAX_LEVEL } from './progression.js';
 import { GAME_LENGTHS, CAMERA_MODES, LIGHTING_MODES, GRAPHICS_MODES } from '../config.js';
 
 export const SAVE_KEY = 'footballsuperstar.save.v1';
+const OLD_LENGTHS = { 3: 5, 5: 9, 7: 13 }; // version 1 game lengths -> the same games now
 
 function defaultStorage() {
   try {
@@ -40,7 +41,10 @@ export function sanitize(raw) {
     if (Number.isFinite(n) && n > 0) career.beaten[rival.id] = Math.floor(n);
   }
   const s = raw.settings || {};
-  if (GAME_LENGTHS.includes(s.target)) career.settings.target = s.target;
+  // Before touchdowns and picks were worth 3, games were first to 3, 5 or 7:
+  // keep a saved choice the same length of game.
+  const target = (raw.version ?? 1) < 2 ? OLD_LENGTHS[s.target] : s.target;
+  if (GAME_LENGTHS.includes(target)) career.settings.target = target;
   if (CAMERA_MODES.includes(s.camera)) career.settings.camera = s.camera;
   if (LIGHTING_MODES.includes(s.lighting)) career.settings.lighting = s.lighting;
   if (GRAPHICS_MODES.includes(s.graphics)) career.settings.graphics = s.graphics;

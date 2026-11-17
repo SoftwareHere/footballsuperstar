@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SIM_DT, QB, GAME_LENGTHS, FALL, DIVE } from '../src/config.js';
 import { RNG } from '../src/core/rng.js';
-import { Match } from '../src/sim/match.js';
+import { Match, scoreFor } from '../src/sim/match.js';
 import { Rep } from '../src/sim/rep.js';
 import { Athlete } from '../src/sim/athlete.js';
 import { ReceiverAI } from '../src/sim/receiverAI.js';
@@ -34,35 +34,56 @@ function playMatch(seed, target, firstPossession = null) {
 }
 
 describe('match rules', () => {
-  it('a completion scores for the receiver, an incompletion for the defender', () => {
-    const { log } = playMatch(11, 7);
-    for (const { offense, before, after, entry } of log) {
-      const defense = offense === 'user' ? 'rival' : 'user';
-      const scorer = entry.complete ? offense : defense;
-      expect(entry.scorer).toBe(scorer);
-      expect(after[scorer]).toBe(before[scorer] + 1);
-      const other = scorer === 'user' ? 'rival' : 'user';
-      expect(after[other]).toBe(before[other]);
-    }
+  it('a catch is 1 and a touchdown 3 for the receiver; an incompletion is 1 and a pick 3 for the defender', () => {
+    expect(scoreFor({ complete: true, reason: 'catch' })).toEqual({ role: 'wr', points: 1 });
+    expect(scoreFor({ complete: true, reason: 'touchdown', touchdown: true })).toEqual({ role: 'wr', points: 3 });
+    expect(scoreFor({ complete: false, reason: 'swat' })).toEqual({ role: 'db', points: 1 });
+    expect(scoreFor({ complete: false, reason: 'oob', pickOob: true })).toEqual({ role: 'db', points: 1 });
+    expect(scoreFor({ complete: false, reason: 'int' })).toEqual({ role: 'db', points: 3 });
   });
 
-  it('possession flips after every point', () => {
-    const { log } = playMatch(12, 7);
-    expect(log.length).toBeGreaterThanOrEqual(7);
+  it('every rep scores for the side it went to, by those rules', () => {
+    const seen = new Set();
+    for (const seed of [11, 21, 31]) {
+      const { log } = playMatch(seed, 13);
+      for (const { offense, before, after, entry } of log) {
+        const defense = offense === 'user' ? 'rival' : 'user';
+        const scorer = entry.complete ? offense : defense;
+        const points = entry.touchdown || entry.reason === 'int' ? 3 : 1;
+        seen.add(entry.touchdown ? 'td' : entry.reason);
+        expect(entry.scorer).toBe(scorer);
+        expect(entry.points).toBe(points);
+        expect(after[scorer]).toBe(before[scorer] + points);
+        const other = scorer === 'user' ? 'rival' : 'user';
+        expect(after[other]).toBe(before[other]);
+      }
+    }
+    // Both kinds of score for the offense came up.
+    expect(seen.has('td')).toBe(true);
+    expect(seen.has('catch')).toBe(true);
+  });
+
+  it('possession flips after every rep', () => {
+    const { log } = playMatch(12, 13);
+    expect(log.length).toBeGreaterThanOrEqual(5);
     for (const step of log) expect(step.nextOffense).not.toBe(step.offense);
     for (let i = 1; i < log.length; i++) expect(log[i].offense).not.toBe(log[i - 1].offense);
   });
 
-  it('ends exactly when someone reaches the target, for every game length', () => {
+  it('ends as soon as someone reaches the target, for every game length', () => {
+    expect(GAME_LENGTHS).toEqual([5, 9, 13]);
     for (const target of GAME_LENGTHS) {
       for (const seed of [1, 2, 3]) {
         const { match, log } = playMatch(seed, target);
         const { user, rival } = match.score;
-        expect(Math.max(user, rival)).toBe(target);
+        // A 3-point play can carry the winner past the number, by at most 2.
+        expect(match.score[match.winner]).toBeGreaterThanOrEqual(target);
+        expect(match.score[match.winner]).toBeLessThanOrEqual(target + 2);
         expect(Math.min(user, rival)).toBeLessThan(target);
-        expect(match.score[match.winner]).toBe(target);
-        expect(log.length).toBe(user + rival);
-        expect(log.length).toBeLessThanOrEqual(2 * target - 1);
+        // Nobody had reached it before the last rep.
+        const last = log[log.length - 1];
+        expect(Math.max(last.before.user, last.before.rival)).toBeLessThan(target);
+        expect(log.reduce((sum, l) => sum + l.entry.points, 0)).toBe(user + rival);
       }
     }
   });
@@ -264,7 +285,9 @@ describe('physical reps', () => {
       expect(r.log.indexOf('hit')).toBeGreaterThan(r.log.indexOf('catch'));
       const held = r.result.complete && r.result.throughContact === true;
       const jarred = !r.result.complete && r.result.reason === 'hit';
-      expect(held || jarred).toBe(true);
+      // Held on in the air, but came down out of bounds.
+      const out = !r.result.complete && r.result.reason === 'oob';
+      expect(held || jarred || out).toBe(true);
       expect(r.result.hit).toBeGreaterThan(0);
     }
     // And the other way round: nobody gets 'hit' as a reason without a hit.
@@ -276,7 +299,7 @@ describe('physical reps', () => {
       expect(r.result).not.toBe(null);
       expect(count(r.log, 'throw')).toBe(1);
       expect(count(r.log, 'result')).toBe(1);
-      expect(r.result.time).toBeLessThan(12);
+      expect(r.result.time).toBeLessThan(16);
       if (r.result.complete) expect(r.rep.wr.hasBall).toBe(true);
       else if (r.result.reason !== 'int') expect(r.rep.wr.hasBall).toBe(false);
     }

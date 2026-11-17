@@ -7,7 +7,7 @@ import { DefenderAI } from '../src/sim/defenderAI.js';
 import { uniformRatings, STAT_KEYS } from '../src/sim/ratings.js';
 import { newCareer, spendPoint, addXp } from '../src/progression/progression.js';
 import { RIVALS } from '../src/progression/opponents.js';
-import { completionRate } from './simHarness.js';
+import { completionRate, runRep } from './simHarness.js';
 
 const rate = (wr, db, reps = 400) =>
   completionRate({ wrRatings: uniformRatings(wr), dbRatings: uniformRatings(db), reps }).rate;
@@ -51,6 +51,45 @@ describe('balance', () => {
     const asDb = (stats) => completionRate({ wrRatings: rival, dbRatings: stats, reps: 400 }).rate;
     expect(asWr(veteran.stats)).toBeGreaterThan(asWr(rookie.stats) + 0.1);
     expect(asDb(veteran.stats)).toBeLessThan(asDb(rookie.stats) - 0.1);
+  });
+
+  it('after the catch: some go the distance, most caught well short of it are stopped, and tackling decides how many', () => {
+    const afterCatch = (wrRatings, dbRatings, reps = 400) => {
+      let catches = 0;
+      let tds = 0;
+      let yac = 0;
+      let far = 0;
+      let farTds = 0;
+      let picks = 0;
+      for (let i = 0; i < reps; i++) {
+        const { result } = runRep({ wrRatings, dbRatings, seed: 4000 + i });
+        if (result.reason === 'int') picks += 1;
+        if (!result.complete) continue;
+        catches += 1;
+        if (result.touchdown) tds += 1;
+        yac += result.yac;
+        if (result.catchYard >= 15) {
+          far += 1;
+          if (result.touchdown) farTds += 1;
+        }
+      }
+      return { share: tds / catches, yac: yac / catches, farShare: farTds / far, picks: picks / reps };
+    };
+    const u = uniformRatings;
+    const even = afterCatch(u(65), u(65));
+    expect(even.share).toBeGreaterThan(0.2);
+    expect(even.share).toBeLessThan(0.65);
+    expect(even.farShare).toBeLessThan(0.4);
+    expect(even.picks).toBeLessThan(0.1);
+    // Strength is tackling: a strong corner gives up fewer touchdowns and fewer yards after the catch.
+    const strong = afterCatch(u(65), { ...u(65), strength: 90 });
+    const weak = afterCatch(u(65), { ...u(65), strength: 40 });
+    expect(strong.share).toBeLessThan(weak.share - 0.05);
+    expect(strong.yac).toBeLessThan(weak.yac);
+    // Agility makes tacklers miss.
+    const elusive = afterCatch({ ...u(65), agility: 90 }, u(65));
+    expect(elusive.share).toBeGreaterThan(even.share + 0.05);
+    expect(elusive.yac).toBeGreaterThan(even.yac);
   });
 
   it('a corner who expects a route takes it away', () => {

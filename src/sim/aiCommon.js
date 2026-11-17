@@ -2,6 +2,11 @@ import { GRAVITY, DIVE, JUMP } from '../config.js';
 import { len2 } from '../core/vec.js';
 import { planBallPlay } from './catching.js';
 
+// An AI defender lays out at the receiver only from this close...
+const MAN_DIVE = 2.2;
+// ...and, when he is not gambling, for the ball only from this close.
+const SAFE_DIVE = 3;
+
 /**
  * What kind of route is this, judged from the receiver's motion?
  * 'in' / 'out' = breaking across the field, 'deep' = vertical,
@@ -17,7 +22,7 @@ export function classifyBreak(vel, side) {
 }
 
 export function blankIntent() {
-  return { x: 0, z: 0, sprint: false, jump: false, juke: 0, call: false, snap: false };
+  return { x: 0, z: 0, sprint: false, jump: false, juke: 0, call: false, snap: false, safe: false };
 }
 
 /** Steer toward a desired velocity, expressed as a throttled direction. */
@@ -42,9 +47,11 @@ export function steer(out, me, vx, vz) {
  * Run to where the ball is coming down, arrive as it does, and go up for it.
  * `aim` is where this athlete believes the ball will arrive. He only goes up
  * for it if he will be within `jumpRange` yards of that spot; if he cannot
- * get there on his feet he lays out for it instead.
+ * get there on his feet he lays out for it instead. `context` is
+ * { role, foe } (see planBallPlay): a contested ball he plays hard, and a
+ * defender who cannot get to the ball lays out at the receiver.
  */
-export function playTheBall(out, me, ball, aim, jumpLeadScale, jumpRange = 1.7) {
+export function playTheBall(out, me, ball, aim, jumpLeadScale, jumpRange = 1.7, context = {}) {
   const eta = Math.max(ball.eta, 0);
   const dx = aim.x - me.pos.x;
   const dz = aim.z - me.pos.z;
@@ -58,10 +65,25 @@ export function playTheBall(out, me, ball, aim, jumpLeadScale, jumpRange = 1.7) 
   }
   if (me.airborne || me.down || me.gather > 0) return;
   // Out of reach on his feet: dive, timed so he is laid out when it arrives.
-  const plan = planBallPlay(me, ball, aim);
+  const plan = planBallPlay(me, ball, aim, context);
   if (plan.dive) {
-    // Only for a ball he can actually get a hand on, not one sailing to someone else.
-    if (d <= DIVE.range && plan.t <= DIVE.minAir + 0.1 * jumpLeadScale) out.jump = true;
+    if (plan.atMan) {
+      // Laying out at the receiver: only when he is close enough to arrive with the ball.
+      const foe = context.foe;
+      const near = foe && Math.hypot(foe.pos.x - me.pos.x, foe.pos.z - me.pos.z) <= MAN_DIVE;
+      if (near && plan.t <= DIVE.minAir + 0.1 * jumpLeadScale) out.jump = true;
+      return;
+    }
+    // Only for a ball he can actually get a hand on, not one sailing to someone
+    // else. A defender who is not gambling only lays out for one close by: on
+    // the turf, he cannot tackle anybody.
+    const range = context.role === 'db' && context.safe ? SAFE_DIVE : DIVE.range;
+    if (context.role === 'db' && context.foe && plan.aggressive !== 'layout') {
+      // The receiver will get to it first: laying out only puts him on the turf.
+      const foe = context.foe;
+      if (Math.hypot(aim.x - foe.pos.x, aim.z - foe.pos.z) < d) return;
+    }
+    if (d <= range && plan.t <= DIVE.minAir + 0.1 * jumpLeadScale) out.jump = true;
     return;
   }
   // Jump so the peak of the jump meets the ball: the legs have to load first.
