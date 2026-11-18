@@ -54,6 +54,7 @@ export class TouchControls {
     this.knob = el.querySelector('.tp-knob');
     this.call = el.querySelector('.tp-call');
     this.callText = this.call.querySelector('b');
+    this.jump = el.querySelector('.tp-jump');
 
     this.stickId = null; // pointer on the joystick
     this.center = null; // where the stick is while held, in px
@@ -99,11 +100,14 @@ export class TouchControls {
   /** Keep the Call button's label in step with the rep. */
   update(s) {
     const face = callFace(s);
-    const key = `${face.text}:${face.off}`;
+    // After the catch the jump button lays you out: for the goal line, or at his legs.
+    const jump = s.phase === 'run' ? 'DIVE' : 'JUMP';
+    const key = `${face.text}:${face.off}:${jump}`;
     if (key === this.face) return;
     this.face = key;
     this.callText.textContent = face.text;
     this.call.classList.toggle('off', face.off);
+    this.jump.textContent = jump;
   }
 
   // ---------------------------------------------------------------- stick

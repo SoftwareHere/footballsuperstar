@@ -41,7 +41,12 @@ export const USER_ASSIST = {
   closingBurst: 1.1, // defender top-speed multiplier while the ball is in the air
 };
 
-export const GAME_LENGTHS = [3, 5, 7];
+export const GAME_LENGTHS = [5, 9, 13];
+
+// What a rep is worth, and to whom. A catch the receiver is stopped short
+// with is 1; carrying it into the end zone is 3. An incompletion is 1 for the
+// defender; an interception is 3.
+export const SCORING = { catch: 1, touchdown: 3, stop: 1, interception: 3 };
 
 // 'lock' is the cinematic camera: bolted to the player, always facing the end zone.
 export const CAMERA_MODES = ['follow', 'broadcast', 'lock'];
@@ -51,11 +56,11 @@ export const GRAPHICS_MODES = ['auto', 'low', 'medium', 'high'];
 // Laying out for a ball that is coming down out of reach.
 export const DIVE = {
   minGap: 1.25, // a jump covers anything closer than this
-  range: 3.5, // farthest a dive can cover, yards
+  range: 4.2, // farthest a dive can cover, yards
   height: 1.35, // a laid-out receiver meets the ball about this far off the turf
-  maxTime: 0.62, // only once the ball is this close to coming down
+  maxTime: 0.74, // only once the ball is this close to coming down
   minAir: 0.34, // shortest and longest time spent laid out
-  maxAir: 0.62,
+  maxAir: 0.7,
   minSpeed: 5.0,
   maxSpeed: 9.5,
   reach: 1.15, // how far ahead of the body the hands get
@@ -78,6 +83,7 @@ export const JUMP = {
   load: 0.12, // seconds between deciding to jump and the feet leaving the turf
   attack: 2.2, // most speed he can add toward the ball as he takes off, yd/s
   landing: 0.22, // seconds the legs take to soak up a clean landing
+  landSpeed: 0.85, // fraction of his top speed he can come down with
   turnRate: 12, // rad/s he can turn his body to the ball, on the way up too
   squareUp: 0.5, // a receiver on his feet turns to a ball this close to arriving, seconds
   defend: 1.2, // a defender goes up only if he expects to be within this of the ball, yards
@@ -141,3 +147,53 @@ export const FALL = {
   settle: 1.2, // he does not start getting up while still sliding faster than this, yd/s
 };
 
+
+// A ball that comes in stride with the other man right on him: he plays it
+// hard, laying out for it or going up to take it at its highest point.
+export const CONTEST = {
+  near: 1.7, // the other man is this close: it is a contested ball
+  ahead: 0.35, // ...and it is coming down where he is running (cosine)
+  attack: 1.7, // a high-point jump pushes off this much harder
+  reach: [0.08, 0.24], // ...and his hands get this much farther, by rating
+  layoutReach: 0.18, // a layout gets the hands this much farther out, at the top rating
+};
+
+// After the catch the receiver is a ball carrier until he scores or is stopped.
+export const RUN = {
+  maxTime: 7, // seconds after the catch before the play is whistled dead
+};
+
+// Bringing a ball carrier down.
+export const TACKLE = {
+  reach: 1.1, // yards between them at which the tackler gets his arms on him
+  base: 0.7, // an evenly matched tackler, squared up on his feet, wraps him up this often
+  skill: 0.9, // how sharply tackling against elusiveness tells
+  behind: 0.62, // fraction of that from behind or from the side: an arm tackle
+  juke: 0.5, // fraction left when the runner is mid-sidestep
+  hitAt: 6, // closing speed (yd/s) where a made tackle is a hit that knocks him down at once
+  wrap: [0.35, 0.85], // seconds a wrapped runner keeps churning before he goes down
+  drag: 9, // yd/s^2 a wrap takes off him while he churns
+  breakFree: 0.22, // chance an evenly matched runner breaks a wrap
+  rest: 0.55, // seconds after a miss before the same man can try again
+  hold: 0.86, // yards the tackler holds on at (just clear of the two bodies touching)
+  // Laying out at his legs.
+  diveMin: 0.8,
+  diveRange: 3.8,
+  diveSpeed: 11, // a lunge at a man's legs is quicker than a dive for a ball, yd/s
+  diveRadius: 0.5, // how close the hands have to get to his legs
+  diveBase: 0.5, // a dive that gets there brings him down this often, before quality and ratings
+};
+
+// Getting both feet down in bounds.
+export const TOE = {
+  zone: 1.4, // yards from a boundary where a man coming down with his momentum carrying him out reaches for it
+  minOut: 0.8, // ...and that momentum, yd/s
+  reach: [0.12, 0.62], // how far behind him he can drag his toes, poor to great body control
+  stride: 0.13, // seconds until the second foot comes down on an ordinary landing
+  late: 0.035, // ...and on a toe drag: they come down almost together
+  drag: 0.26, // seconds the toes are dragging the turf
+  friction: 12, // yd/s^2 the drag takes off him
+  spread: 0.13, // feet this far either side of his centre line
+  plantZone: 0.6, // going up with his momentum taking him to within this of a line, or over it...
+  plant: 4, // ...he keeps up to this much of that momentum on the turf, yd/s (by body control)
+};

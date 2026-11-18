@@ -187,6 +187,12 @@ export class Sfx {
           this.tone({ freq: 2350 + (i % 2) * 180, dur: 0.07, type: 'sine', gain: 0.1, delay: 0.25 + i * 0.055 });
         }
         break;
+      case 'touchdown':
+        // A stadium horn and the crowd coming up out of their seats.
+        [262, 330, 392, 523].forEach((f, i) => this.tone({ freq: f, dur: 0.5 - i * 0.05, type: 'sawtooth', gain: 0.07, delay: 0.05 + i * 0.09 }));
+        this.tone({ freq: 196, dur: 0.9, type: 'square', gain: 0.06, delay: 0.05 });
+        this.noise({ dur: 2.6, gain: 0.26, freq: 800, to: 1800, q: 0.4, attack: 0.25 });
+        break;
       case 'level':
         [523, 659, 784, 1047].forEach((f, i) => this.tone({ freq: f, dur: 0.2, type: 'triangle', gain: 0.22, delay: i * 0.1 }));
         break;

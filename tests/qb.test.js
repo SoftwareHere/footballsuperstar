@@ -22,7 +22,7 @@ describe('lead pass', () => {
     const cases = [
       { pos: { x: 11, z: -6 }, vel: { x: -7, z: -4 } }, // slant
       { pos: { x: 12, z: -12 }, vel: { x: 0, z: -9 } }, // go
-      { pos: { x: 14, z: -8 }, vel: { x: 8, z: 0 } }, // out
+      { pos: { x: 10, z: -8 }, vel: { x: 8, z: 0 } }, // out
       { pos: { x: 10, z: -7 }, vel: { x: 0, z: 0 } }, // sitting down
     ];
     for (const c of cases) {
@@ -35,11 +35,15 @@ describe('lead pass', () => {
     }
   });
 
-  it('never leads the receiver out of bounds', () => {
+  it('never leads the receiver out of bounds, and leaves him room to get his feet down', () => {
     const lead = solveLead({ from, recvPos: { x: 24, z: -10 }, recvVel: { x: 9, z: 0 } });
-    expect(lead.target.x).toBeLessThanOrEqual(FIELD.halfWidth - 1);
+    expect(lead.target.x).toBeLessThanOrEqual(FIELD.halfWidth - 1.8);
     const deep = solveLead({ from, recvPos: { x: 5, z: -40 }, recvVel: { x: 0, z: -9 } });
-    expect(deep.target.z).toBeGreaterThanOrEqual(FIELD.endZ + 1);
+    expect(deep.target.z).toBeGreaterThanOrEqual(FIELD.endZ + 1.8);
+    // The faster he is heading for the line, the more room the QB leaves him.
+    const drifting = solveLead({ from, recvPos: { x: 22, z: -10 }, recvVel: { x: 3, z: 0 } });
+    const flying = solveLead({ from, recvPos: { x: 22, z: -10 }, recvVel: { x: 9, z: 0 } });
+    expect(FIELD.halfWidth - flying.target.x).toBeGreaterThan(FIELD.halfWidth - drifting.target.x + 0.5);
   });
 
   it('shades the throw away from a defender in tight coverage', () => {

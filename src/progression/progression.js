@@ -1,11 +1,13 @@
 import { STAT_KEYS, STAT_MAX, uniformRatings } from '../sim/ratings.js';
 import { RIVALS } from './opponents.js';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const POINTS_PER_LEVEL = 4;
 export const MAX_LEVEL = 60;
 export const START_RATING = 60;
 export const START_POINTS = 5;
+export const XP_PER_POINT = 17;
+const MID_LENGTH = 9; // the middle game length: the win bonus is scaled from it
 
 /** XP needed to go from `level` to `level + 1`. */
 export function xpToNext(level) {
@@ -24,20 +26,24 @@ export function newCareer() {
     losses: 0,
     beaten: {}, // rival id -> number of wins
     seenHowTo: false,
-    settings: { target: 5, camera: 'follow', muted: false, tier: 1, lighting: 'golden', graphics: 'auto' },
+    settings: { target: 9, camera: 'follow', muted: false, tier: 1, lighting: 'golden', graphics: 'auto' },
   };
 }
 
 export const tierMultiplier = (tier) => 1 + 0.5 * (tier - 1);
 
-/** XP earned for a finished game. Longer games and tougher rivals pay more. */
+/**
+ * XP earned for a finished game. Longer games and tougher rivals pay more.
+ * Touchdowns and picks are worth 3, so a point pays less than it did when
+ * every rep was worth 1, and a game pays about the same.
+ */
 export function matchXp({ won, userPoints, target, tier }) {
   const mult = tierMultiplier(tier);
   const lines = [];
-  const points = Math.round(userPoints * 30 * mult);
+  const points = Math.round(userPoints * XP_PER_POINT * mult);
   lines.push({ label: `${userPoints} point${userPoints === 1 ? '' : 's'} scored`, xp: points });
   if (won) {
-    lines.push({ label: `Win (first to ${target})`, xp: Math.round(100 * mult * (target / 5)) });
+    lines.push({ label: `Win (first to ${target})`, xp: Math.round(100 * mult * (target / MID_LENGTH)) });
   } else {
     lines.push({ label: 'Finished the game', xp: Math.round(25 * mult) });
   }

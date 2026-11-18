@@ -1,4 +1,4 @@
-import { FIELD, REP, HANDS } from '../config.js';
+import { FIELD, REP, HANDS, GRAVITY } from '../config.js';
 import { clamp, dist2 } from '../core/vec.js';
 import { blankIntent, steer, playTheBall, runThrough } from './aiCommon.js';
 
@@ -99,16 +99,71 @@ export class ReceiverAI {
       return out;
     }
 
+    if (rep.phase === 'run') return this.runAfterCatch(rep, out);
+
     if (rep.phase === 'flight') {
       me.faceTarget = null;
       // Ball in his hands: protect it and keep his feet moving.
       if (me.hasBall) runThrough(out, me);
-      else playTheBall(out, me, rep.ball, rep.ball.target, this.jumpLead);
+      else {
+        playTheBall(out, me, rep.ball, rep.ball.target, this.jumpLead, undefined, { role: 'wr', foe: rep.db });
+        // By the line, a ball he can catch on his feet he catches on his feet:
+        // leaving them with his momentum taking him out, he would come down out.
+        const t = rep.ball.target;
+        const drift = 0.6 * ((2 * Math.sqrt(2 * GRAVITY * me.params.jumpHeight)) / GRAVITY);
+        const outX = me.vel.x * Math.sign(t.x);
+        const side = outX > 1 && Math.abs(t.x) + outX * drift > FIELD.halfWidth - 0.3;
+        const end = me.vel.z < -1 && t.z + me.vel.z * drift < FIELD.endZ + 0.3;
+        if (out.jump && (side || end) && t.y < 2.15) out.jump = false;
+      }
       return out;
     }
 
     this.runMove(rep, out);
     this.maybeCall(rep, out);
+    return out;
+  }
+
+  /**
+   * Ball in his hands: get to the end zone. He bends away from the angle the
+   * defender is taking, stays off the sideline, tries to make him miss when
+   * he closes, and stretches out for the goal line when he is about to be hit.
+   */
+  runAfterCatch(rep, out) {
+    const me = rep.wr;
+    const db = rep.db;
+    me.faceTarget = null;
+    const top = me.params.topSpeed;
+    let gx = 0;
+    let gz = -1;
+    const dx = db.pos.x - me.pos.x;
+    const dz = db.pos.z - me.pos.z;
+    const d = Math.hypot(dx, dz) || 1e-3;
+    const toGoal = me.pos.z - FIELD.goalZ;
+    const live = !db.down && !db.diving;
+    if (live && d < 8) {
+      // Away from him, the more so the closer he is and the more he is in front.
+      const inFront = clamp(0.35 - dz / d, 0, 1.3);
+      const w = clamp((8 - d) / 6, 0, 1) * inFront;
+      gx -= (Math.sign(dx) || 1) * w;
+    }
+    // Stay on the field.
+    const room = FIELD.halfWidth - Math.abs(me.pos.x);
+    if (room < 3.5) gx -= Math.sign(me.pos.x) * (3.5 - room) * 0.7;
+    const n = Math.hypot(gx, gz);
+    steer(out, me, (gx / n) * top, (gz / n) * top);
+    out.sprint = true;
+    if (d > 3) this.jukedRun = false;
+    if (!live) return out;
+    const closing = ((db.vel.x - me.vel.x) * -dx + (db.vel.z - me.vel.z) * -dz) / d;
+    // Make him miss as he closes.
+    if (!this.jukedRun && d < 1.9 && d > 0.9 && closing > 1) {
+      this.jukedRun = true;
+      const t = clamp((this.tier - 1) / 7, 0, 1);
+      if (this.rng.chance(0.3 + 0.4 * t)) out.juke = dx > 0 ? -1 : 1;
+    }
+    // Stretch it out for the goal line.
+    if (toGoal > 0.5 && toGoal < 3.4 && d < 2.4) out.jump = true;
     return out;
   }
 
@@ -150,8 +205,8 @@ export class ReceiverAI {
     // Keep running through the break, but stay on the field.
     let fx = this.finalDir.x;
     let fz = this.finalDir.z;
-    if (Math.abs(me.pos.x) > FIELD.halfWidth - 2.5 && Math.sign(fx) === Math.sign(me.pos.x)) fx = 0;
-    if (me.pos.z < FIELD.endZ + 2.5 && fz < 0) fz = 0;
+    if (Math.abs(me.pos.x) > FIELD.halfWidth - 4 && Math.sign(fx) === Math.sign(me.pos.x)) fx = 0;
+    if (me.pos.z < FIELD.endZ + 4 && fz < 0) fz = 0;
     steer(out, me, fx * top, fz * top);
     out.sprint = true;
   }

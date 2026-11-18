@@ -17,9 +17,16 @@ export function readReceiver(receiver, anticipation = 0.65) {
   return { x: v.x + (w.x - v.x) * anticipation, z: v.z + (w.z - v.z) * anticipation };
 }
 
-function clampInBounds(p) {
-  p.x = clamp(p.x, -(FIELD.halfWidth - 1), FIELD.halfWidth - 1);
-  p.z = clamp(p.z, FIELD.endZ + 1, FIELD.backZ - 2);
+// He puts it far enough inside a line for the receiver to get his feet
+// down: more room the faster the receiver is heading for that line.
+const ROOM = 1.8;
+const ROOM_PER_SPEED = 0.22; // extra yards per yd/s the receiver carries toward the line
+
+function clampInBounds(p, vel = null) {
+  const side = ROOM + (vel ? ROOM_PER_SPEED * Math.max(0, vel.x * Math.sign(p.x)) : 0);
+  const end = ROOM + (vel ? ROOM_PER_SPEED * Math.max(0, -vel.z) : 0);
+  p.x = clamp(p.x, -(FIELD.halfWidth - side), FIELD.halfWidth - side);
+  p.z = clamp(p.z, FIELD.endZ + end, FIELD.backZ - 2);
 }
 
 /**
@@ -46,7 +53,7 @@ export function solveLead({ from, recvPos, recvVel, defPos = null, rng = null, e
   for (let i = 0; i < 24; i++) {
     spot.x = recvPos.x + recvVel.x * T + awayX;
     spot.z = recvPos.z + recvVel.z * T + awayZ;
-    clampInBounds(spot);
+    clampInBounds(spot, recvVel);
     distance = Math.hypot(spot.x - from.x, spot.z - from.z);
     T = Math.max(0.3, distance / ballSpeedFor(distance));
   }
@@ -54,7 +61,7 @@ export function solveLead({ from, recvPos, recvVel, defPos = null, rng = null, e
     const sigma = (0.16 + 0.011 * distance) * errorScale;
     spot.x += rng.gauss() * sigma;
     spot.z += rng.gauss() * sigma;
-    clampInBounds(spot);
+    clampInBounds(spot, recvVel);
   }
   return { target: { x: spot.x, y: CATCH_HEIGHT, z: spot.z }, flightTime: T, distance };
 }

@@ -9,12 +9,12 @@ import {
   holdOnProbability,
   groundHoldProbability,
   planBallPlay,
-  isToeTap,
+  feetOut,
   tipChance,
 } from '../src/sim/catching.js';
 import { Ball } from '../src/sim/ball.js';
 import { RNG } from '../src/core/rng.js';
-import { SIM_DT, DIVE, FIELD, TIP } from '../src/config.js';
+import { SIM_DT, DIVE, FIELD, TIP, JUMP } from '../src/config.js';
 
 const athlete = (rating, extra = {}) => new Athlete({ ratings: { ...uniformRatings(rating), ...extra }, x: 0, z: 0 });
 const base = { quality: 0.9, attempting: true, separation: 5, dbAttempting: false, dbInReach: false };
@@ -173,16 +173,106 @@ describe('physical catches', () => {
     expect(reachInfo(a, 'wr', spot).inReach).toBe(false);
   });
 
-  it('a toe-tap is a catch at the boundary with momentum carrying him out', () => {
+  it('feet come down under him in the open field; by a line he drags them back in, as far as his body control allows', () => {
+    const open = athlete(70);
+    open.pos.x = 10;
+    open.vel.x = 6;
+    open.facing = Math.PI / 2;
+    const free = open.footfall();
+    expect(free.dragged).toBe(false);
+    expect(free.feet[1].x).toBeGreaterThan(open.pos.x + 0.5); // the second foot a stride on
+    // Coming down just over the sideline with his momentum taking him out.
+    const over = (rating) => {
+      const a = athlete(60, { agility: rating, hands: rating });
+      a.pos.x = FIELD.halfWidth + 0.3;
+      a.vel.x = 5;
+      a.facing = Math.PI / 2;
+      return a.footfall();
+    };
+    const great = over(95);
+    expect(great.dragged).toBe(true);
+    expect(feetOut(great.feet)).toBe(0);
+    // Both toes behind him, toward the field, and down almost together.
+    for (const f of great.feet) expect(f.x).toBeLessThan(FIELD.halfWidth);
+    expect(Math.abs(great.feet[0].x - great.feet[1].x)).toBeLessThan(0.25);
+    expect(feetOut(over(40).feet)).toBeGreaterThan(0);
+    // Well over: nobody gets them in.
+    const far = athlete(99);
+    far.pos.x = FIELD.halfWidth + 1.5;
+    far.vel.x = 5;
+    expect(feetOut(far.footfall().feet)).toBe(2);
+    // The end line works the same way.
+    const back = athlete(95);
+    back.pos.z = FIELD.endZ - 0.2;
+    back.vel.z = -6;
+    expect(back.footfall().dragged).toBe(true);
+    expect(feetOut(back.footfall().feet)).toBe(0);
+  });
+
+  it('a contested ball coming in stride is played hard: a layout or a high-point, by his ratings and the ball', () => {
+    // He is running onto it, two yards short, with the defender on his hip.
+    const setup = (ratings, ballY = 1.65) => {
+      const ball = new Ball(0, 2.1, 5);
+      ball.throwTo({ x: 0, y: 2.1, z: 5 }, { x: 0, y: ballY, z: -10 }, 0.75);
+      while (ball.eta > 0.25) ball.step(SIM_DT);
+      const a = athlete(60, ratings);
+      a.pos.z = -8;
+      a.vel.z = -7;
+      const foe = athlete(60);
+      foe.pos.x = 0.8;
+      foe.pos.z = -8.3;
+      foe.vel.z = -7;
+      return { a, ball, foe };
+    };
+    const quick = setup({ agility: 95, speed: 95, jumping: 40, strength: 40 });
+    const layout = planBallPlay(quick.a, quick.ball, null, { role: 'wr', foe: quick.foe });
+    expect(layout.aggressive).toBe('layout');
+    expect(layout.dive).toBe(true);
+    expect(layout.reach).toBeGreaterThan(0);
+    const leaper = setup({ jumping: 95, strength: 95, agility: 40, speed: 40 });
+    const high = planBallPlay(leaper.a, leaper.ball, null, { role: 'wr', foe: leaper.foe });
+    expect(high.aggressive).toBe('highPoint');
+    expect(high.dive).toBe(false);
+    expect(high.attack).toBeGreaterThan(JUMP.attack);
+    expect(high.reach).toBeGreaterThan(0);
+    // Even ratings: the height of the ball decides.
+    expect(planBallPlay(setup({}).a, setup({}).ball, null, { foe: setup({}).foe }).aggressive).toBe('layout');
+    const lofted = setup({}, 2.4);
+    expect(planBallPlay(lofted.a, lofted.ball, null, { foe: lofted.foe }).aggressive).toBe('highPoint');
+    // Nobody near him: an ordinary jump.
+    const alone = planBallPlay(quick.a, quick.ball, null, { role: 'wr', foe: null });
+    expect(alone.aggressive).toBeUndefined();
+    expect(alone.dive).toBe(false);
+    // The defender plays it hard the same way, coming down in his path.
+    const db = planBallPlay(quick.a, quick.ball, null, { role: 'db', foe: quick.foe });
+    expect(db.aggressive).toBe('layout');
+    // Keeping his feet: no layout, he goes up for it instead.
+    expect(planBallPlay(quick.a, quick.ball, null, { role: 'db', foe: quick.foe, safe: true }).aggressive).toBe('highPoint');
+    // A contested high-point reaches farther than an ordinary jump.
     const a = athlete(60);
-    a.pos.x = FIELD.halfWidth - 0.4;
-    a.vel.x = 6;
-    expect(isToeTap(a)).toBe(true);
-    a.vel.x = -6; // coming back in
-    expect(isToeTap(a)).toBe(false);
-    a.pos.x = 0;
-    a.vel.x = 6; // middle of the field
-    expect(isToeTap(a)).toBe(false);
+    a.attempting = true;
+    const plain = reachInfo(a, 'wr', { x: 0, y: 2, z: 0 }).radius;
+    a.playReach = high.reach;
+    expect(reachInfo(a, 'wr', { x: 0, y: 2, z: 0 }).radius).toBeGreaterThan(plain);
+  });
+
+  it('a defender who cannot get to the ball lays out at the receiver instead; a receiver never does', () => {
+    const ball = incoming(); // coming down at (0, -10)
+    // The receiver has drifted off the spot toward the defender, who is well away from the ball.
+    const wr = athlete(60);
+    wr.pos.x = 1.4;
+    wr.pos.z = -10;
+    wr.vel.x = 6;
+    const db = athlete(60);
+    db.pos.x = 4.8;
+    db.pos.z = -10;
+    const plan = planBallPlay(db, ball, null, { role: 'db', foe: wr });
+    expect(plan.dive).toBe(true);
+    expect(plan.atMan).toBe(true);
+    expect(plan.x).toBeLessThan(-0.9); // at him
+    // Not when he is keeping his feet, and never for a receiver.
+    expect(planBallPlay(db, ball, null, { role: 'db', foe: wr, safe: true }).dive).toBe(false);
+    expect(planBallPlay(db, ball, null, { role: 'wr', foe: wr }).dive).toBe(false);
   });
 
   it('a ball that hits him square is more likely to pop up alive', () => {

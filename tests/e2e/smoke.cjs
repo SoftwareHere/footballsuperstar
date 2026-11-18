@@ -82,6 +82,7 @@ async function playRep(page, { call, shots = {} }) {
   let pressedCall = false;
   let sawLive = false;
   let sawFlight = false;
+  let sawRun = false;
   let maxLiveT = 0;
 
   await page.keyboard.press('Space'); // snap on offense, "ready" on defense
@@ -106,6 +107,12 @@ async function playRep(page, { call, shots = {} }) {
       } else {
         steer(s.me, { x: s.him.x, z: s.him.z - 1.2 }, want);
       }
+    } else if (s.phase === 'run') {
+      // After the catch: sprint for the end zone, or run him down.
+      sawRun = true;
+      want.add('ShiftLeft');
+      if (role === 'wr') want.add('KeyW');
+      else steer(s.me, s.him, want);
     } else if (s.phase === 'flight' && s.target) {
       if (!sawFlight && shots.flight) await page.screenshot({ path: path.join(SHOTS, shots.flight) });
       sawFlight = true;
@@ -131,13 +138,13 @@ async function playRep(page, { call, shots = {} }) {
     const m = window.__fs.match;
     return { ...m.history[m.history.length - 1], score: { ...m.score }, winner: m.winner, possession: m.possession };
   });
-  return { role, start, entry, sawLive, sawFlight, maxLiveT };
+  return { role, start, entry, sawLive, sawFlight, sawRun, maxLiveT };
 }
 
 /** Play a whole game from the setup screen's Start button. */
 async function playGame(page, { call, label, shots = false }) {
   const reps = [];
-  for (let n = 0; n < 12; n++) {
+  for (let n = 0; n < 16; n++) {
     const state = await page.evaluate(() => window.__fs.state);
     if (state !== 'match') break;
     const first = reps.find((r) => r.role === 'wr') === undefined;
@@ -172,16 +179,18 @@ function checkRules(reps, target) {
     const offense = rep.role === 'wr' ? 'user' : 'rival';
     const defense = offense === 'user' ? 'rival' : 'user';
     const scorer = e.complete ? offense : defense;
-    if (scorer === 'user') user += 1;
-    else rival += 1;
+    const points = e.touchdown || e.reason === 'int' ? 3 : 1;
+    if (e.points !== points) throw new Error(`wrong points on rep ${i + 1}`);
+    if (scorer === 'user') user += points;
+    else rival += points;
     if (e.score.user !== user || e.score.rival !== rival) throw new Error(`score wrong after rep ${i + 1}`);
     if (e.scorer !== scorer) throw new Error(`wrong scorer on rep ${i + 1}`);
     if (i > 0 && reps[i - 1].role === rep.role) throw new Error(`possession did not flip before rep ${i + 1}`);
     if (!rep.sawFlight) throw new Error(`no throw seen on rep ${i + 1}`);
   });
-  assert(true, 'completion = point for the receiver, incompletion = point for the defender, every rep');
-  assert(true, 'possession flipped after every point');
-  assert(Math.max(user, rival) === target && Math.min(user, rival) < target, `game ended at first to ${target} (${user}-${rival})`);
+  assert(true, 'catch 1 / touchdown 3 for the receiver, incompletion 1 / pick 3 for the defender, every rep');
+  assert(true, 'possession flipped after every rep');
+  assert(Math.max(user, rival) >= target && Math.min(user, rival) < target, `game ended at first to ${target} (${user}-${rival})`);
 }
 
 (async () => {
@@ -229,17 +238,17 @@ function checkRules(reps, target) {
   await page.keyboard.press('Enter'); // Play
   await sleep(250);
   assert((await page.evaluate(() => window.__fs.ui.screen)) === 'setup', 'Play opens rival and game-length setup');
-  await page.click('[data-target="3"]');
+  await page.click('[data-target="5"]');
   await sleep(150);
   await page.screenshot({ path: path.join(SHOTS, '04-setup.png') });
   const lengths = await page.$$eval('[data-action="length"]', (els) => els.map((e) => e.dataset.target).join(','));
-  assert(lengths === '3,5,7', 'game length offers first to 3, 5 or 7');
+  assert(lengths === '5,9,13', 'game length offers first to 5, 9 or 13');
   await page.click('[data-action="start"]');
 
-  console.log('Game 1: first to 3, calling for the ball on offense');
+  console.log('Game 1: first to 5, calling for the ball on offense');
   const careerBefore = await page.evaluate(() => ({ level: window.__fs.career.level, xp: window.__fs.career.xp }));
   const game1 = await playGame(page, { call: true, label: 'g1', shots: true });
-  checkRules(game1, 3);
+  checkRules(game1, 5);
   assert(game1.some((r) => r.role === 'wr') && game1.some((r) => r.role === 'db'), 'played both offense and defense');
   const offense1 = game1.filter((r) => r.role === 'wr');
   assert(offense1.every((r) => r.entry.called && !r.entry.forced), 'pressing Enter made the QB throw (called, not forced)');
@@ -264,7 +273,7 @@ function checkRules(reps, target) {
   console.log('Game 2: rematch, never calling for the ball');
   await page.click('[data-action="rematch"]');
   const game2 = await playGame(page, { call: false, label: 'g2' });
-  checkRules(game2, 3);
+  checkRules(game2, 5);
   const offense2 = game2.filter((r) => r.role === 'wr');
   assert(offense2.length > 0, 'had the ball at least once');
   assert(offense2.every((r) => r.entry.forced && !r.entry.called), 'with no call, the QB was forced to throw');

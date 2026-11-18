@@ -19,11 +19,22 @@ describe('save', () => {
     addXp(c, 500);
     spendPoint(c, 'hands');
     c.unlocked = 3;
-    c.settings.target = 7;
+    c.settings.target = 13;
     c.settings.camera = 'broadcast';
     expect(saveCareer(c, storage)).toBe(true);
     expect(loadCareer(storage)).toEqual(sanitize(c));
     expect(loadCareer(storage).stats.hands).toBe(61);
+    expect(loadCareer(storage).settings.target).toBe(13);
+  });
+
+  it('an old save keeps the same length of game now that touchdowns are worth 3', () => {
+    // Version 1 games were first to 3, 5 or 7.
+    expect(sanitize({ version: 1, settings: { target: 3 } }).settings.target).toBe(5);
+    expect(sanitize({ version: 1, settings: { target: 5 } }).settings.target).toBe(9);
+    expect(sanitize({ settings: { target: 7 } }).settings.target).toBe(13);
+    // A current save is taken as it is.
+    expect(sanitize({ version: 2, settings: { target: 5 } }).settings.target).toBe(5);
+    expect(sanitize({ version: 2, settings: { target: 7 } }).settings.target).toBe(9);
   });
 
   it('starts a new career when nothing is saved or the save is corrupt', () => {
@@ -43,7 +54,7 @@ describe('save', () => {
     expect(c.stats.hands).toBe(1);
     expect(c.stats.agility).toBe(60);
     expect(c.unlocked).toBe(8);
-    expect(c.settings.target).toBe(5);
+    expect(c.settings.target).toBe(9);
     expect(c.settings.camera).toBe('follow');
   });
 

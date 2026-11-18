@@ -1,7 +1,10 @@
-import { HANDS, JUMP } from '../config.js';
+import { HANDS, JUMP, FIELD, TACKLE } from '../config.js';
 import { clamp } from '../core/vec.js';
 import { norm } from './ratings.js';
 import { blankIntent, steer, playTheBall, classifyBreak } from './aiCommon.js';
+
+// How often the rival corner is willing to leave his feet on a contested ball.
+const GAMBLE = 0.15;
 
 /**
  * The rival playing cornerback. He sees the receiver slightly in the past
@@ -52,6 +55,8 @@ export class DefenderAI {
     this.throwSeenAt = null;
     this.aimError = null;
     this.jumpLead = 1;
+    // Some reps he will gamble on a contested ball: lay out for it, or at the man.
+    this.gamble = this.rng.chance(GAMBLE);
   }
 
   /** Where the receiver was `seenT` seconds into the rep. */
@@ -97,6 +102,8 @@ export class DefenderAI {
       }
     }
 
+    if (rep.phase === 'run') return this.pursue(rep, out);
+
     if (rep.phase === 'flight' && rep.securing) {
       // The receiver has it but has not finished the catch: go through him.
       me.speedCap = 1;
@@ -137,12 +144,45 @@ export class DefenderAI {
           z: ball.target.z + this.aimError.z * blur - (qz / qn) * 0.2,
         };
         // He has to actually get to the catch point to make a play on it.
-        playTheBall(out, me, ball, aim, this.jumpLead, JUMP.defend);
+        out.safe = !this.gamble;
+        playTheBall(out, me, ball, aim, this.jumpLead, JUMP.defend, { role: 'db', foe: rep.wr, safe: out.safe });
         return out;
       }
     }
 
     this.cover(rep, out);
+    return out;
+  }
+
+  /**
+   * He caught it: run him down. Take an angle on where he is going, let the
+   * contact make the tackle, and lay out at his legs when he is pulling away
+   * or about to score.
+   */
+  pursue(rep, out) {
+    const me = rep.db;
+    const wr = rep.wr;
+    const p = me.params;
+    me.speedCap = 1;
+    me.backpedal = false;
+    me.faceTarget = null;
+    const dx = wr.pos.x - me.pos.x;
+    const dz = wr.pos.z - me.pos.z;
+    const d = Math.hypot(dx, dz) || 1e-3;
+    // A better read takes a better angle.
+    const angle = 0.55 + 0.4 * clamp(norm(me.ratings.agility), 0, 1);
+    const t = Math.min(1.2, d / p.topSpeed) * angle;
+    const ax = wr.pos.x + wr.vel.x * t - me.pos.x;
+    const az = wr.pos.z + wr.vel.z * t - me.pos.z;
+    const n = Math.hypot(ax, az) || 1;
+    steer(out, me, (ax / n) * p.topSpeed, (az / n) * p.topSpeed);
+    out.sprint = true;
+    if (me.airborne || me.down || wr.down || wr.diving) return out;
+    const away = (wr.vel.x * dx + wr.vel.z * dz) / d; // how fast he is getting away
+    const toGoal = wr.pos.z - FIELD.goalZ;
+    const gettingAway = away > 1.5 && wr.speed > me.speed + 0.2 && d < 2.8;
+    const scoring = toGoal < 4.5 && d < 3.2;
+    if (d > TACKLE.diveMin + 0.3 && (gettingAway || scoring)) out.jump = true;
     return out;
   }
 

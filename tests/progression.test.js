@@ -49,20 +49,27 @@ describe('progression', () => {
   });
 
   it('winning, longer games and tougher rivals all pay more', () => {
-    const win = matchXp({ won: true, userPoints: 5, target: 5, tier: 1 }).total;
-    const loss = matchXp({ won: false, userPoints: 4, target: 5, tier: 1 }).total;
-    const shutout = matchXp({ won: false, userPoints: 0, target: 5, tier: 1 }).total;
+    const win = matchXp({ won: true, userPoints: 9, target: 9, tier: 1 }).total;
+    const loss = matchXp({ won: false, userPoints: 7, target: 9, tier: 1 }).total;
+    const shutout = matchXp({ won: false, userPoints: 0, target: 9, tier: 1 }).total;
     expect(win).toBeGreaterThan(loss);
     expect(loss).toBeGreaterThan(shutout);
     expect(shutout).toBeGreaterThan(0);
-    expect(matchXp({ won: true, userPoints: 7, target: 7, tier: 1 }).total).toBeGreaterThan(win);
-    expect(matchXp({ won: true, userPoints: 3, target: 3, tier: 1 }).total).toBeLessThan(win);
-    expect(matchXp({ won: true, userPoints: 5, target: 5, tier: 4 }).total).toBeGreaterThan(win);
+    expect(matchXp({ won: true, userPoints: 13, target: 13, tier: 1 }).total).toBeGreaterThan(win);
+    expect(matchXp({ won: true, userPoints: 5, target: 5, tier: 1 }).total).toBeLessThan(win);
+    expect(matchXp({ won: true, userPoints: 9, target: 9, tier: 4 }).total).toBeGreaterThan(win);
+  });
+
+  it('a game pays about what it did when every rep was worth a point', () => {
+    // A first-to-9 win now is the same length of game as a first-to-5 win was (250 XP at tier 1).
+    const mid = matchXp({ won: true, userPoints: 9, target: 9, tier: 1 }).total;
+    expect(mid).toBeGreaterThan(220);
+    expect(mid).toBeLessThan(280);
   });
 
   it('a first win levels you up and unlocks the next rival', () => {
     const c = newCareer();
-    const out = recordMatch(c, { won: true, userPoints: 5, target: 5, tier: 1 });
+    const out = recordMatch(c, { won: true, userPoints: 9, target: 9, tier: 1 });
     expect(out.levels).toBeGreaterThanOrEqual(1);
     expect(c.level).toBeGreaterThan(1);
     expect(c.wins).toBe(1);

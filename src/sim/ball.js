@@ -1,4 +1,4 @@
-import { GRAVITY, CATCH_HEIGHT, TIP } from '../config.js';
+import { GRAVITY, CATCH_HEIGHT, TIP, DIVE } from '../config.js';
 
 /** The football: held by the QB, in flight, caught, or loose after a deflection. */
 export class Ball {
@@ -81,6 +81,13 @@ export class Ball {
   step(dt) {
     if (this.state === 'caught' && this.holder) {
       const h = this.holder;
+      if (h.diving && h.diveKind === 'carry') {
+        // Stretched out ahead of him in both hands: it can break the plane before he lands.
+        this.pos.x = h.pos.x + h.diveDir.x * DIVE.reach;
+        this.pos.z = h.pos.z + h.diveDir.z * DIVE.reach;
+        this.pos.y = h.y + 0.75;
+        return false;
+      }
       this.pos.x = h.pos.x + Math.sin(h.facing) * 0.25;
       this.pos.z = h.pos.z + Math.cos(h.facing) * 0.25;
       this.pos.y = h.y + (h.down ? 0.35 : 1.25);

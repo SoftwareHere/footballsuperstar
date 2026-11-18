@@ -1,5 +1,5 @@
-import { QB, WR_START_X, BODY_RADIUS, USER_ASSIST, CONTACT, TIP, JUMP, BALANCE, HANDS } from '../config.js';
-import { clamp, dist2 } from '../core/vec.js';
+import { QB, WR_START_X, BODY_RADIUS, USER_ASSIST, CONTACT, TIP, JUMP, BALANCE, HANDS, FIELD, RUN, TACKLE, DIVE, TOE } from '../config.js';
+import { clamp, lerp, dist2, distToVerticalSegment } from '../core/vec.js';
 import { Athlete, NO_INTENT } from './athlete.js';
 import { Ball } from './ball.js';
 import { Quarterback } from './qb.js';
@@ -8,12 +8,17 @@ import {
   isAttempt,
   planBallPlay,
   classifyCatch,
-  isToeTap,
   catchProbability,
   breakupProbability,
   holdOnProbability,
   groundHoldProbability,
   tipChance,
+  feetOut,
+  spotInBounds,
+  inEndZone,
+  tackleOdds,
+  breakFreeOdds,
+  diveTackleOdds,
 } from './catching.js';
 import { classifyBreak } from './aiCommon.js';
 
@@ -25,17 +30,25 @@ function limitSpeed(a, limit) {
   a.vel.z *= limit / speed;
 }
 
+/** Yards from the goal line (0 or less is in the end zone). */
+export const yardLine = (z) => z - FIELD.goalZ;
+
 /**
  * One rep of 1-on-1s: receiver vs. defender with the AI QB throwing.
  *
- *   presnap -> live -> flight -> done
+ *   presnap -> live -> flight -> run -> done
  *
  * Controllers (keyboard or AI) are asked for an intent every tick. The rep
  * is pure simulation: it knows nothing about rendering or who the human is.
  *
  * The catch is physical. A ball that comes off hands can pop up and stay
  * alive; a receiver who gets it still has to hold on through a hit, or
- * through the ground if he dove for it, before the rep is his.
+ * through the ground if he dove for it, and a man who caught it in the air
+ * has to come down with both feet in bounds (or his body, if he dove).
+ *
+ * A finished catch short of the goal line is not the end of it: he is a
+ * ball carrier ('run') until he gets into the end zone or the defender
+ * brings him down, and the defender has to tackle him to stop him.
  *
  * So is everything before it. Within arm's reach the two men fight with
  * their hands: the defender jams, the receiver pushes off and works past,
@@ -75,7 +88,9 @@ export class Rep {
     this.wrTried = false;
     this.dbTried = false;
     this.approach = { wr: false, db: false }; // has the ball come toward him yet?
-    this.securing = null; // { until, needGround, info } while a catch is being finished
+    this.securing = null; // { until, needGround, needFeet, threat, hitDone, info } while a catch is being finished
+    this.pick = null; // { info } an interception made in the air, until he comes down
+    this.run = null; // the play after the catch: { t, info, startZ, broken, rest, wrap, diveTried, tackledBy }
     this.tipReason = null; // what the incompletion is if a tipped ball falls
     this.tipInfo = null;
     this.touching = false;
@@ -116,6 +131,8 @@ export class Rep {
         return this.stepLive(dt);
       case 'flight':
         return this.stepFlight(dt);
+      case 'run':
+        return this.stepRun(dt);
       default:
         return this.stepDone(dt);
     }
@@ -155,12 +172,28 @@ export class Rep {
       this.emit('call');
     }
     // With the ball in the air, leaving your feet means playing it: a jump,
-    // or a dive if that is the only way to get there.
+    // or a dive if that is the only way to get there. After the catch it
+    // means a dive: the ball carrier's for the goal line, the defender's at
+    // his legs (and nothing at all if he is too far away for that).
     const live = this.phase === 'flight' && this.ball.state === 'flight';
+    const running = this.phase === 'run';
     this.watchBall(live);
     this.handFight(dt);
-    this.wr.step(wrI, dt, live && wrI.jump ? planBallPlay(this.wr, this.ball) : null);
-    this.db.step(dbI, dt, live && dbI.jump ? planBallPlay(this.db, this.ball) : null);
+    if (running) this.holdOn();
+    let wrPlay = null;
+    let dbPlay = null;
+    if (live) {
+      if (wrI.jump) wrPlay = planBallPlay(this.wr, this.ball, null, { role: 'wr', foe: this.db, safe: Boolean(wrI.safe) });
+      if (dbI.jump) dbPlay = planBallPlay(this.db, this.ball, null, { role: 'db', foe: this.wr, safe: Boolean(dbI.safe) });
+    } else if (running) {
+      if (wrI.jump) wrPlay = this.carrierDive();
+      if (dbI.jump && !(dbPlay = this.tackleDive())) dbI.jump = false;
+    }
+    // Ball in his hands and the play not his to run yet: no jumping with it.
+    if (this.wr.hasBall && !running) wrI.jump = false;
+    if (this.db.hasBall) dbI.jump = false;
+    this.wr.step(wrI, dt, wrPlay);
+    this.db.step(dbI, dt, dbPlay);
     this.report();
     const contact = this.collide();
     this.jostle(contact);
@@ -531,7 +564,8 @@ export class Rep {
    * the play is over, a big enough hit puts a man down.
    */
   jostle(contact) {
-    if (!contact || !contact.fresh || contact.closing < CONTACT.minHit || this.securing) return;
+    // After the catch, contact is a tackle (see tackling).
+    if (!contact || !contact.fresh || contact.closing < CONTACT.minHit || this.securing || this.phase === 'run') return;
     this.emit('contact', { power: contact.closing });
     const done = this.phase === 'done';
     for (const who of ['wr', 'db']) this.strike(contact, who, done ? {} : { scale: BALANCE.jostle, floor: BALANCE.floor });
@@ -577,6 +611,7 @@ export class Rep {
     if (!this.dbCtl.isAI) this.db.speedCap = USER_ASSIST.closingBurst;
     const contact = this.stepAthletes(dt);
     const hitGround = this.ball.step(dt);
+    if (this.pick) return this.stepPick();
     if (this.securing) return this.stepSecuring(contact);
     if (this.ball.state === 'flight' && this.ball.tFlight > 0.1) this.checkCatch();
     if (!this.result && hitGround) this.finish(false, this.tipReason || 'ground', this.tipInfo || {});
@@ -641,16 +676,11 @@ export class Rep {
         dbInReach: contested,
         catchType,
       });
-      const info = { p, separation, contested, catchType, tips: ball.tips };
+      const info = { p, separation, contested, catchType, tips: ball.tips, aggressive: this.wr.aggressive || undefined };
       if (this.rng.chance(p)) {
-        if (!this.wr.inBounds) {
-          ball.deflect(this.rng, 0.4);
-          return this.finish(false, 'oob', info);
-        }
-        info.toeTap = isToeTap(this.wr);
         ball.attachTo(this.wr);
         this.wr.hasBall = true;
-        this.wr.catchInfo = { type: catchType, toeTap: info.toeTap };
+        this.wr.catchInfo = { type: catchType, toeTap: false };
         this.emit('catch', { catchType });
         return this.secure(info, separation);
       }
@@ -668,10 +698,16 @@ export class Rep {
         const odds = tipped && prev.db.kind !== 'block' ? this.db.params.intChance * (0.7 + quality) : this.db.params.intChance * quality;
         const pick = (isAttempt(prev.db.kind) || (tipped && prev.db.kind === 'body')) && this.rng.chance(odds);
         if (pick) {
-          ball.attachTo(this.db);
-          this.db.hasBall = true;
-          this.db.catchInfo = { type: tipped ? 'juggle' : prev.db.kind === 'dive' ? 'dive' : 'leap', toeTap: false };
-          return this.finish(false, 'int', { tips: ball.tips });
+          const db = this.db;
+          ball.attachTo(db);
+          db.hasBall = true;
+          db.catchInfo = { type: tipped ? 'juggle' : prev.db.kind === 'dive' ? 'dive' : 'leap', toeTap: false };
+          this.emit('pick');
+          this.pick = { info: { tips: ball.tips, aggressive: db.aggressive || undefined } };
+          // In the air he still has to come down in bounds with it.
+          if (db.airborne) return undefined;
+          this.settle(db);
+          return this.stepPick();
         }
         if (ball.tips < TIP.max && this.rng.chance(TIP.swat)) return this.tipBall('db', 'swat', {});
         ball.deflect(this.rng);
@@ -695,45 +731,119 @@ export class Rep {
     return undefined;
   }
 
+  /** Caught it with his feet still on the turf (legs loading for a jump): he stays down there. */
+  settle(a) {
+    if (a.gather > 0) {
+      a.gather = 0;
+      a.jumpPlan = null;
+      a.attempting = false;
+    }
+  }
+
   /**
-   * He has it in his hands. Usually that is the catch; but if the defender
-   * is about to arrive, or he dove and still has to land, he has to finish it.
+   * Where a man who caught it on his feet put them, and whether that was in
+   * bounds: the foot he is standing on, and the next one down. Near a line
+   * he drags that one in if he can.
+   */
+  groundRuling(a) {
+    const ff = a.footfall(true);
+    if (ff.dragged) {
+      a.feetDown = ff.feet;
+      a.feetDownThisTick = true;
+      a.dragged = true;
+      a.toeDrag = TOE.drag;
+    }
+    return this.feetRuling(ff.feet, ff.dragged);
+  }
+
+  /** Where a man who caught it in the air came down: both feet, or his body if he went down. */
+  landingRuling(a) {
+    if (a.down || !a.feetDown) {
+      const spot = a.bodyDown ? { ...a.bodyDown } : { x: a.pos.x, z: a.pos.z };
+      return { out: spotInBounds(spot) ? 0 : 1, spot, kind: 'body', toeTap: false };
+    }
+    return this.feetRuling(a.feetDown, a.dragged);
+  }
+
+  feetRuling(feet, dragged) {
+    const out = feetOut(feet);
+    const spot = { x: (feet[0].x + feet[1].x) / 2, z: (feet[0].z + feet[1].z) / 2 };
+    // A toe-tap: he had to drag them in to get them down by the line.
+    const byLine = (f) => FIELD.halfWidth - Math.abs(f.x) < 0.6 || f.z - FIELD.endZ < 0.6;
+    return { out, spot, kind: 'feet', toeTap: !out && dragged && feet.some(byLine) };
+  }
+
+  /** Has a man who caught it in the air come back to earth? */
+  cameDown(a) {
+    return !a.airborne && (!a.down || a.y <= 0);
+  }
+
+  /**
+   * He has it in his hands. Usually that is the catch; but he has to have
+   * come down with it in bounds, and if the defender is about to arrive, or
+   * he dove and still has to land, he has to finish it.
    */
   secure(info, separation) {
     const wr = this.wr;
     const db = this.db;
+    this.settle(wr);
     // Is the defender near enough, and coming, to get there before it is tucked away?
     let closing = 0;
     if (separation > 1e-3) {
       closing = ((db.vel.x - wr.vel.x) * (wr.pos.x - db.pos.x) + (db.vel.z - wr.vel.z) * (wr.pos.z - db.pos.z)) / separation;
     }
     const threat = !db.down && separation < CONTACT.threat && closing > CONTACT.closing;
-    if (!wr.diving && !threat) return this.finish(true, 'catch', info);
+    if (!wr.airborne) {
+      // Feet on the turf: they have to be in bounds, and so does the next one down.
+      const ruling = this.groundRuling(wr);
+      if (ruling.out) return this.noCatch(info, ruling);
+      info.toeTap = ruling.toeTap;
+      info.spot = ruling.spot;
+      if (!threat) return this.completeCatch(info);
+    }
     wr.securing = true;
-    this.securing = { until: this.t + CONTACT.window, needGround: wr.diving, threat, info };
+    this.securing = { until: this.t + CONTACT.window, needGround: wr.diving, needFeet: wr.airborne && !wr.diving, threat, hitDone: false, info };
     return undefined;
   }
 
   stepSecuring(contact) {
     const s = this.securing;
     const wr = this.wr;
-    if (contact && contact.closing >= CONTACT.minHit) return this.resolveHit(contact);
-    if (s.needGround) {
-      if (!wr.down && wr.airborne) return undefined; // still laid out
-      // The ground is the last defender.
-      if (this.rng.chance(groundHoldProbability(wr))) return this.finish(true, 'catch', s.info);
-      wr.hasBall = false;
-      this.ball.deflect(this.rng, 0.5);
-      return this.finish(false, 'drop', { ...s.info, lostToGround: true });
+    if (contact && contact.closing >= CONTACT.minHit && !s.hitDone) return this.resolveHit(contact);
+    if (s.needGround || s.needFeet) {
+      if (!this.cameDown(wr)) return undefined; // still in the air
+      const ruling = this.landingRuling(wr);
+      if (ruling.out) return this.noCatch(s.info, ruling);
+      s.info.toeTap = ruling.toeTap;
+      s.info.spot = ruling.spot;
+      // The ground is the last defender (unless he has already held on through a hit).
+      if (s.needGround && !s.hitDone && !this.rng.chance(groundHoldProbability(wr))) {
+        wr.hasBall = false;
+        this.ball.deflect(this.rng, 0.5);
+        return this.finish(false, 'drop', { ...s.info, lostToGround: true });
+      }
+      s.needGround = false;
+      s.needFeet = false;
+      if (wr.down || !s.threat || s.hitDone || this.t >= s.until) return this.completeCatch(s.info);
+      return undefined;
     }
-    if (this.t >= s.until) return this.finish(true, 'catch', s.info);
+    if (this.t >= s.until) return this.completeCatch(s.info);
     return undefined;
+  }
+
+  /** He had it, but he did not come down in bounds with it. */
+  noCatch(info, ruling) {
+    const wr = this.wr;
+    wr.hasBall = false;
+    this.ball.deflect(this.rng, 0.3);
+    return this.finish(false, 'oob', { ...info, feetOut: ruling.kind === 'feet' ? ruling.out : 0, bodyOut: ruling.kind === 'body' });
   }
 
   /**
    * The defender arrives with the ball in the receiver's hands. Whether the
    * ball stays there is one question; whether either man stays on his feet
-   * is another, and that one is settled by balance.
+   * is another, and that one is settled by balance. A man who holds on in
+   * the air still has to come down in bounds.
    */
   resolveHit(contact) {
     const s = this.securing;
@@ -746,16 +856,324 @@ export class Rep {
     this.strike(contact, 'db');
     this.report();
     this.emit('hit', { power: contact.closing, held, down });
-    if (held) return this.finish(true, 'catch', { ...info, throughContact: true, knockedDown: down });
+    if (held) {
+      s.info = { ...info, throughContact: true, knockedDown: down };
+      s.hitDone = true;
+      if (s.needGround || s.needFeet) return undefined;
+      return this.completeCatch(s.info);
+    }
     wr.hasBall = false;
     this.ball.deflect(this.rng, 0.8);
     return this.finish(false, 'hit', { ...info, knockedDown: down });
   }
 
+  /** An interception made in the air: it is his once he comes down in bounds with it. */
+  stepPick() {
+    const db = this.db;
+    if (!this.cameDown(db)) return undefined;
+    const info = this.pick.info;
+    const ruling = db.feetDownThisTick || db.down ? this.landingRuling(db) : this.groundRuling(db);
+    if (ruling.out) {
+      db.hasBall = false;
+      this.ball.deflect(this.rng, 0.3);
+      return this.finish(false, 'oob', { ...info, pickOob: true, feetOut: ruling.kind === 'feet' ? ruling.out : 0, bodyOut: ruling.kind === 'body' });
+    }
+    return this.finish(false, 'int', { ...info, pickYard: yardLine(ruling.spot.z) });
+  }
+
+  /** Is the ball in his hands across the goal line, in bounds? */
+  brokePlane() {
+    const b = this.ball;
+    const wr = this.wr;
+    return b.holder === wr && b.state === 'caught' && b.pos.z <= FIELD.goalZ && Math.abs(b.pos.x) < FIELD.halfWidth && Math.abs(wr.pos.x) < FIELD.halfWidth;
+  }
+
+  /**
+   * The catch is made. In the end zone it is a touchdown; on the turf he is
+   * down where he is; otherwise he is a ball carrier now.
+   */
+  completeCatch(info) {
+    const wr = this.wr;
+    this.securing = null;
+    wr.securing = false;
+    const spot = info.spot || { x: wr.pos.x, z: wr.pos.z };
+    info = { ...info, toeTap: Boolean(info.toeTap), catchYard: yardLine(spot.z) };
+    delete info.spot;
+    wr.catchInfo = { type: info.catchType, toeTap: info.toeTap };
+    if (inEndZone(spot) || this.brokePlane()) {
+      return this.finish(true, 'touchdown', { ...info, touchdown: true, endedBy: 'endzone', endYard: 0, yac: 0, brokenTackles: 0 });
+    }
+    if (wr.down) {
+      return this.finish(true, 'catch', { ...info, touchdown: false, endedBy: info.knockedDown ? 'hit' : 'down', endYard: info.catchYard, yac: 0, brokenTackles: 0 });
+    }
+    this.phase = 'run';
+    this.run = { t: 0, info, startZ: spot.z, broken: 0, rest: 0, wrap: null, diveTried: false, tackledBy: null };
+    this.emit('caught', { catchType: info.catchType, toeTap: info.toeTap });
+    return undefined;
+  }
+
+  // ------------------------------------------------------- after the catch
+
+  stepRun(dt) {
+    this.t += dt;
+    const run = this.run;
+    run.t += dt;
+    run.rest = Math.max(0, run.rest - dt);
+    // A human defender keeps his closing burst while he chases.
+    if (!this.dbCtl.isAI) this.db.speedCap = USER_ASSIST.closingBurst;
+    const contact = this.stepAthletes(dt);
+    this.tackling(dt, contact);
+    this.ball.step(dt);
+    if (this.result) return undefined;
+    const wr = this.wr;
+    if (this.brokePlane()) return this.endRun(true, 'endzone');
+    if (!spotInBounds(wr.pos)) return this.endRun(false, wr.sinceContact < 0.5 ? 'pushed' : 'oob');
+    if (wr.down) return this.endRun(false, run.tackledBy || (wr.diveKind === 'carry' ? 'stretch' : 'down'));
+    if (run.t >= RUN.maxTime) return this.endRun(false, 'whistle');
+    return undefined;
+  }
+
+  /** The play after the catch is over: in the end zone, or stopped short of it. */
+  endRun(touchdown, endedBy) {
+    const run = this.run;
+    run.wrap = null;
+    const spotZ = touchdown ? FIELD.goalZ : this.ball.state === 'caught' ? this.ball.pos.z : this.wr.pos.z;
+    const info = {
+      ...run.info,
+      touchdown,
+      endedBy,
+      stretched: this.wr.diving && this.wr.diveKind === 'carry', // dove for it
+      endYard: touchdown ? 0 : yardLine(spotZ),
+      yac: Math.max(0, run.startZ - spotZ),
+      brokenTackles: run.broken,
+    };
+    return this.finish(true, touchdown ? 'touchdown' : 'catch', info);
+  }
+
+  /** The ball carrier presses to leave his feet: he dives ahead, stretching the ball out. */
+  carrierDive() {
+    const wr = this.wr;
+    if (wr.airborne || wr.down || wr.gather > 0 || wr.toeDrag > 0) return null;
+    let dx = wr.vel.x;
+    let dz = wr.vel.z;
+    const speed = Math.hypot(dx, dz);
+    if (speed < 2) {
+      dx = Math.sin(wr.facing);
+      dz = Math.cos(wr.facing);
+    }
+    const n = Math.hypot(dx, dz) || 1;
+    // Wrapped up, it is a lunge: whatever he has left, and a push.
+    const lunge = Boolean(this.run?.wrap);
+    const go = lunge ? clamp(speed + 2.2, 3.5, 5.5) : clamp(speed + 1.2, DIVE.minSpeed, 8.5);
+    return { dive: true, x: dx / n, z: dz / n, speed: go, air: lunge ? 0.34 : 0.42, kind: 'carry' };
+  }
+
+  /**
+   * The defender presses to leave his feet after the catch: he lays out at
+   * the ball carrier's legs, leading him. Too close for that, or too far,
+   * and it does nothing (null).
+   */
+  tackleDive() {
+    const wr = this.wr;
+    const db = this.db;
+    if (db.airborne || db.down || db.gather > 0 || wr.down || this.run?.wrap) return null;
+    const d = Math.hypot(wr.pos.x - db.pos.x, wr.pos.z - db.pos.z);
+    if (d < TACKLE.diveMin || d > TACKLE.diveRange) return null;
+    const lead = clamp(d / 8, 0.12, 0.45);
+    const tx = wr.pos.x + wr.vel.x * lead - db.pos.x;
+    const tz = wr.pos.z + wr.vel.z * lead - db.pos.z;
+    const td = Math.hypot(tx, tz) || 1;
+    const air = clamp(lead + 0.12, DIVE.minAir, 0.52);
+    const speed = clamp((td - DIVE.reach * 0.6) / Math.max(lead, 0.15), DIVE.minSpeed, TACKLE.diveSpeed);
+    return { dive: true, x: tx / td, z: tz / td, speed, air, kind: 'tackle' };
+  }
+
+  /** A wrapped-up runner has the tackler on him: hands for the picture, and his legs are not free. */
+  holdOn() {
+    const w = this.run?.wrap;
+    if (!w) return;
+    this.wr.held = 1;
+    this.wr.hands = { kind: 'wrapped', k: 1, on: true, side: w.side };
+    this.db.hands = { kind: 'wrap', k: 1, on: true, side: -w.side };
+  }
+
+  /**
+   * After the catch the defender has to bring him down. With his arms on
+   * him and in front of him enough to get them round him, he tries to: a
+   * made tackle that arrives with real speed knocks him off his feet; any
+   * other wraps him up, and he churns forward until he goes down, or breaks
+   * it. A miss leaves the runner stumbling on and the tackler off balance.
+   * A defender who lays out at his legs takes them out or trips him up.
+   */
+  tackling(dt, contact) {
+    const run = this.run;
+    const wr = this.wr;
+    const db = this.db;
+    if (run.wrap) return this.stepWrap(dt);
+    if (!db.diving) run.diveTried = false;
+    if (wr.down || db.down || this.result) return undefined;
+    if (db.diving) {
+      // Laid out at his legs, or still in the air from going for the ball or the man.
+      if (!run.diveTried) this.checkDiveTackle();
+      return undefined;
+    }
+    if (wr.diving || db.airborne || db.gather > 0 || run.rest > 0) return undefined;
+    const dx = wr.pos.x - db.pos.x;
+    const dz = wr.pos.z - db.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > TACKLE.reach || d < 1e-4) return undefined;
+    // He has to be facing him to get his arms round him.
+    const facing = (dx * Math.sin(db.facing) + dz * Math.cos(db.facing)) / d;
+    if (facing < 0.2 && !contact) return undefined;
+    return this.attemptTackle(dx / d, dz / d, clamp(facing, 0, 1));
+  }
+
+  /** The tackler gets his arms on him. (nx, nz) points from tackler to runner. */
+  attemptTackle(nx, nz, facing) {
+    const run = this.run;
+    const wr = this.wr;
+    const db = this.db;
+    const va = -(wr.vel.x * nx + wr.vel.z * nz); // the runner's speed into the tackler
+    const vb = db.vel.x * nx + db.vel.z * nz; // ...and the tackler's into him
+    const closing = Math.max(0, va + vb);
+    const runSpeed = wr.speed;
+    // Head on (1) to from behind (0): is the runner coming at him?
+    const front = (runSpeed > 1 ? clamp(0.5 + (0.5 * va) / runSpeed, 0, 1) : 1) * (0.6 + 0.4 * facing);
+    const sw = wr.params.strength;
+    const sd = db.params.strength;
+    // In the form strike() uses: normal from receiver to defender.
+    const contact = { closing, va, vb, nx: -nx, nz: -nz, aShare: sd / (sw + sd), fresh: true };
+    const juking = wr.jukeLock > 0;
+    if (this.rng.chance(tackleOdds({ tackler: db, runner: wr, front, juking }))) {
+      if (closing >= TACKLE.hitAt) {
+        // He arrives with everything he has: a hit that can take him straight off his feet.
+        this.strike(contact, 'wr', { scale: 1.4 });
+        this.strike(contact, 'db', { scale: 0.4 });
+        this.emit('tackle', { kind: 'hit', power: closing });
+        this.report();
+        if (wr.down) {
+          run.tackledBy = 'hit';
+          return undefined;
+        }
+      }
+      // Arms round him: he churns, the tackler hangs on and is towed.
+      const edge = clamp(0.5 + (sw - sd) / (sw + sd), 0, 1);
+      const until = lerp(TACKLE.wrap[0], TACKLE.wrap[1], edge) * (1.15 - 0.3 * front);
+      const breaks = this.rng.chance(breakFreeOdds({ tackler: db, runner: wr, front }));
+      const lateral = -nz * wr.vel.x + nx * wr.vel.z;
+      run.wrap = {
+        t: 0,
+        until,
+        breakAt: breaks ? until * this.rng.range(0.3, 0.85) : null,
+        ox: -nx,
+        oz: -nz,
+        side: lateral >= 0 ? 1 : -1,
+      };
+      this.emit('wrap', { power: closing });
+      return undefined;
+    }
+    // Missed him: the runner is jolted but slips it; the tackler lunged at air.
+    run.broken += 1;
+    run.rest = TACKLE.rest;
+    this.strike(contact, 'wr', { scale: BALANCE.jostle, floor: BALANCE.floor });
+    if (this.strike(contact, 'db', { scale: 0.8 }) === null) db.startStumble(0.55);
+    this.emit('broken', { kind: juking ? 'juke' : 'miss' });
+    this.report();
+    return undefined;
+  }
+
+  /** A runner wrapped up: he drives on, dragging the tackler, until he goes down or breaks it. */
+  stepWrap(dt) {
+    const run = this.run;
+    const w = run.wrap;
+    const wr = this.wr;
+    const db = this.db;
+    w.t += dt;
+    if (wr.diving) {
+      // He lunges out of it with the ball out in front: he is going down either way, and so is the tackler.
+      run.wrap = null;
+      run.tackledBy = 'wrap';
+      db.knockdown({ vx: wr.vel.x * 0.4, vy: 0.6, vz: wr.vel.z * 0.4, high: true }, CONTACT.downTime);
+      this.report();
+      return undefined;
+    }
+    // Every step costs him: the more man on him, the more.
+    const speed = wr.speed;
+    if (speed > 1e-6) {
+      const lose = TACKLE.drag * dt * clamp(db.params.strength / wr.params.strength, 0.6, 1.6);
+      const k = Math.max(0, speed - lose) / speed;
+      wr.vel.x *= k;
+      wr.vel.z *= k;
+    }
+    wr.sinceContact = 0;
+    // The tackler goes where he goes.
+    db.pos.x = wr.pos.x + w.ox * TACKLE.hold;
+    db.pos.z = wr.pos.z + w.oz * TACKLE.hold;
+    db.vel.x = wr.vel.x;
+    db.vel.z = wr.vel.z;
+    db.facing = Math.atan2(-w.ox, -w.oz);
+    if (w.breakAt !== null && w.t >= w.breakAt) {
+      // He tears out of it, and the man who had him ends up on the turf.
+      run.wrap = null;
+      run.broken += 1;
+      run.rest = TACKLE.rest + 0.3;
+      db.knockdown({ vx: w.ox * 1.4, vy: 0.8, vz: w.oz * 1.4, high: false }, CONTACT.downTime);
+      wr.startStumble(0.45);
+      this.emit('broken', { kind: 'shed' });
+      this.report();
+      return undefined;
+    }
+    if (w.t >= w.until) {
+      // Down he goes, falling forward the way he was driving, with the tackler on him.
+      run.wrap = null;
+      run.tackledBy = 'wrap';
+      const push = 1.2;
+      const n = Math.hypot(wr.vel.x, wr.vel.z);
+      const fx = n > 0.3 ? wr.vel.x / n : -w.ox;
+      const fz = n > 0.3 ? wr.vel.z / n : -w.oz;
+      wr.knockdown({ vx: fx * push, vy: 1, vz: fz * push, high: false }, CONTACT.downTime);
+      db.knockdown({ vx: fx * push * 0.8, vy: 0.8, vz: fz * push * 0.8, high: true }, CONTACT.downTime * 0.8);
+      this.emit('tackle', { kind: 'wrap' });
+      this.report();
+    }
+    return undefined;
+  }
+
+  /** A defender laid out at the runner: do his hands get to the legs? */
+  checkDiveTackle() {
+    const run = this.run;
+    const wr = this.wr;
+    const db = this.db;
+    const d = db.diveDir;
+    let best = Infinity;
+    for (const k of [0.45, 0.75, 1]) {
+      const pt = { x: db.pos.x + d.x * DIVE.reach * k, y: db.y + 0.45, z: db.pos.z + d.z * DIVE.reach * k };
+      best = Math.min(best, distToVerticalSegment(pt, wr.pos.x, wr.pos.z, 0, 1.0));
+    }
+    if (best > TACKLE.diveRadius) return;
+    run.diveTried = true;
+    const quality = 1 - best / TACKLE.diveRadius;
+    const juking = wr.jukeLock > 0;
+    if (this.rng.chance(diveTackleOdds({ quality, tackler: db, runner: wr, juking }))) {
+      // Legs taken out from under him: he goes over, forward.
+      wr.knockdown({ vx: d.x * 1.2, vy: 0.7, vz: d.z * 1.2, high: false }, CONTACT.downTime);
+      run.tackledBy = 'dive';
+      this.emit('tackle', { kind: 'dive' });
+    } else {
+      // A hand on an ankle: he stumbles, and keeps going.
+      wr.hit(BALANCE.absorb + 2.4, d.x, d.z, BALANCE.floor);
+      run.broken += 1;
+      this.emit('broken', { kind: 'trip' });
+    }
+    this.report();
+  }
+
   finish(complete, reason, info = {}) {
     if (this.result) return;
     this.securing = null;
+    this.pick = null;
     this.wr.securing = false;
+    if (this.run) this.run.wrap = null;
     this.result = {
       complete,
       reason,
