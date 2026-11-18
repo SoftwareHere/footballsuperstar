@@ -106,6 +106,14 @@ The result is in `dist/`.
   reaches farther (if you can jump and are strong, and the ball is high).
   Either side can do it. On defense, a ball you cannot reach at all turns
   your dive on the receiver: lay out at him, and get there with the ball.
+- **Who is better placed.** On defense, if you have got ahead of the
+  receiver (farther down the ball's path than he is) and it is coming down
+  on his side of you, `Space` dives you back into him, to get there with the
+  ball. If you are ahead and closer to it yourself, an overthrow, you play
+  the ball. On offense, when the defender is better placed for it, you do not
+  lay out past him: you go up and attack the ball, back toward it if it is
+  behind you. And nobody's jump carries him away from the ball: going up for
+  one behind him, a man plants and goes up and back for it.
 - **After the catch.** Unless you caught it in the end zone, the play goes
   on: you are a ball carrier until you get into the end zone or he stops
   you. Run out of bounds, go down, or get tackled and it is a catch (1).
@@ -264,7 +272,8 @@ npm test
 ```
 
 This runs the unit tests (rules, catching, contact, the run after the catch
-and tackling, feet in bounds, the rag doll, getting up, save data) plus a
+and tackling, feet in bounds, the rag doll, getting up, save data, the
+player model's surfaces) plus a
 balance suite that simulates thousands of AI-vs-AI reps to
 check that ratings decide who wins, so levelling up really helps.
 
@@ -285,7 +294,10 @@ Everything expensive is done once, not every frame: the uniforms, turf and
 crowd are painted into textures and merged meshes at load, and reflections
 come from one picture of the stadium taken whenever the lighting changes.
 Each player is a single skinned mesh (one draw call) and the whole stadium is
-a handful, so a frame is about 30 draw calls. The picture quality has five
+a handful, so a frame is about 30 draw calls. The turf is left out of that
+picture of the stadium (it would turn every white uniform green); the light
+it sends back up onto the players, under their arms and between their legs,
+is worked out from the lighting instead. The picture quality has five
 levels:
 
 | Level | Resolution | Shadows | Camera look (HDR, bloom, grade) | Turf |

@@ -156,6 +156,9 @@ export const CONTEST = {
   attack: 1.7, // a high-point jump pushes off this much harder
   reach: [0.08, 0.24], // ...and his hands get this much farther, by rating
   layoutReach: 0.18, // a layout gets the hands this much farther out, at the top rating
+  // Who is better placed for the ball.
+  lead: 0.3, // yards farther along the ball's flight that put a man ahead of the other one
+  edge: 0.25, // yards closer to where it comes down that give the other man the better chance at it
 };
 
 // After the catch the receiver is a ball carrier until he scores or is stopped.

@@ -96,10 +96,14 @@ function loft(sections, { cx = 0, cz = 0, seg = 16, rings = 24, a0 = 0, uv, weig
       const a = a0 + u * TAU;
       P(a, s, p);
       pos.push(p.x, p.y, p.z);
-      ta.subVectors(P(a + eps, s, pa), P(a - eps, s, pb));
-      ts.subVectors(P(a, Math.min(n - 1, s + eps), pa), P(a, Math.max(0, s - eps), pb));
+      // The surface normal from the two directions along it. They are tiny
+      // differences, so they are made unit length before they are crossed: the
+      // cross of the raw ones is far too small to judge on a thin limb, and
+      // would be taken for a closed-off end (pointing straight up or down).
+      ta.subVectors(P(a + eps, s, pa), P(a - eps, s, pb)).normalize();
+      ts.subVectors(P(a, Math.min(n - 1, s + eps), pa), P(a, Math.max(0, s - eps), pb)).normalize();
       const nn = ts.cross(ta);
-      if (tiny || nn.lengthSq() < 1e-14) nn.set(0, s < (n - 1) / 2 ? -1 : 1, 0);
+      if (tiny || nn.lengthSq() < 1e-6) nn.set(0, s < (n - 1) / 2 ? -1 : 1, 0);
       nn.normalize();
       nor.push(nn.x, nn.y, nn.z);
       const t = uv(u, p.y);

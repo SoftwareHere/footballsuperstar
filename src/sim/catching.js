@@ -95,7 +95,10 @@ export function contestedInStride(athlete, target, foe, eta) {
  * he lays out for it (aggressive: 'layout') or goes up and takes it at its
  * highest point (aggressive: 'highPoint'), whichever his ratings and the
  * height of the ball suit. A defender who cannot get to the ball at all
- * lays out at the receiver instead (atMan: true).
+ * lays out at the receiver instead (atMan: true), and so does one who has
+ * got ahead of the receiver with the ball coming down on the receiver's side
+ * of him: he dives back into him. A receiver whose defender is better placed
+ * for the ball does not lay out past him: he goes up and back toward it.
  */
 export function planBallPlay(athlete, ball, aim = null, { role = 'wr', foe = null, safe = false } = {}) {
   if (ball.state !== 'flight' || !ball.target || athlete.down || athlete.airborne) return PLAIN_JUMP;
@@ -103,6 +106,13 @@ export function planBallPlay(athlete, ball, aim = null, { role = 'wr', foe = nul
   const target = aim || ball.target;
   const eta = Math.max(ball.eta, 0);
   const jump = { dive: false, x: target.x, z: target.z, t: eta };
+  // Go up and take it at its highest point: a harder push toward it, and a longer reach.
+  const highPoint = () => ({
+    ...jump,
+    aggressive: 'highPoint',
+    attack: JUMP.attack * CONTEST.attack,
+    reach: lerp(CONTEST.reach[0], CONTEST.reach[1], p.highPoint),
+  });
   const low = ball.whenAt(DIVE.height);
 
   // Lay out at the point where the ball gets down to diving height.
@@ -120,18 +130,45 @@ export function planBallPlay(athlete, ball, aim = null, { role = 'wr', foe = nul
     return { dive: true, x: dx / d, z: dz / d, speed, air, t: low.t };
   };
 
+  // Lay out at the man the ball is going to, at (mx, mz), timed to get there with it.
+  const diveAtMan = (mx, mz) => {
+    if (eta > DIVE.maxAir + 0.2) return null;
+    const fx = mx - athlete.pos.x;
+    const fz = mz - athlete.pos.z;
+    const d = Math.hypot(fx, fz);
+    if (d < 0.6 || d > DIVE.range + 0.4) return null;
+    const air = clamp(eta + 0.05, DIVE.minAir, DIVE.maxAir);
+    const speed = clamp((d - 0.5) / Math.max(eta, 0.12), DIVE.minSpeed, DIVE.maxSpeed);
+    return { dive: true, x: fx / d, z: fz / d, speed, air, t: eta, atMan: true };
+  };
+  const live = foe && !foe.down;
+  // How much closer the other man is to where it comes down: > 0, his is the better chance.
+  const foeEdge = live ? gapTo(athlete, target) - gapTo(foe, target) : -Infinity;
+
+  if (role === 'db' && !safe && live && ball.tips === 0) {
+    // Ahead of the receiver with the ball coming down on his side of you: going
+    // up for it only carries you away from it. Dive back into him and get
+    // there with the ball. (Closer to it yourself, you play the ball.)
+    const ahead = alongFlight(ball, athlete) - alongFlight(ball, foe) >= CONTEST.lead;
+    if (ahead && foeEdge >= CONTEST.edge) {
+      const meet = meetPoint(foe, target, eta);
+      return diveAtMan(meet.x, meet.z) || jump;
+    }
+  }
+
+  if (role === 'wr' && live && foeEdge >= CONTEST.edge && gapTo(foe, target) <= DIVE.range) {
+    // The defender has the better chance at it: no laying out past him. Go up
+    // and attack the ball, back toward it if that is where it is.
+    return highPoint();
+  }
+
   if (contestedInStride(athlete, target, foe, eta)) {
     const high = clamp((target.y - CATCH_HEIGHT) / 0.7, 0, 1);
     if (!safe && p.layout + 0.35 * (1 - high) > p.highPoint + 0.35 * high) {
       const layout = diveAtBall();
       if (layout) return { ...layout, aggressive: 'layout', reach: CONTEST.layoutReach * p.layout };
     }
-    return {
-      ...jump,
-      aggressive: 'highPoint',
-      attack: JUMP.attack * CONTEST.attack,
-      reach: lerp(CONTEST.reach[0], CONTEST.reach[1], p.highPoint),
-    };
+    return highPoint();
   }
 
   // Where a jump would leave him when the ball gets there.
@@ -142,18 +179,33 @@ export function planBallPlay(athlete, ball, aim = null, { role = 'wr', foe = nul
   const dive = diveAtBall();
   if (dive) return dive;
 
-  if (role === 'db' && !safe && foe && !foe.down && eta <= DIVE.maxAir + 0.2) {
+  if (role === 'db' && !safe && live) {
     // Nowhere near the ball: go at the man it is going to, and get there with it.
-    const fx = foe.pos.x + foe.vel.x * eta - athlete.pos.x;
-    const fz = foe.pos.z + foe.vel.z * eta - athlete.pos.z;
-    const d = Math.hypot(fx, fz);
-    if (d >= 0.6 && d <= DIVE.range + 0.4) {
-      const air = clamp(eta + 0.05, DIVE.minAir, DIVE.maxAir);
-      const speed = clamp((d - 0.5) / Math.max(eta, 0.12), DIVE.minSpeed, DIVE.maxSpeed);
-      return { dive: true, x: fx / d, z: fz / d, speed, air, t: eta, atMan: true };
-    }
+    const atMan = diveAtMan(foe.pos.x + foe.vel.x * eta, foe.pos.z + foe.vel.z * eta);
+    if (atMan) return atMan;
   }
   return jump;
+}
+
+/** Horizontal distance from an athlete to a point. */
+const gapTo = (a, pt) => Math.hypot(pt.x - a.pos.x, pt.z - a.pos.z);
+
+/** How far along the ball's line of flight an athlete is (yards, along its horizontal travel). */
+function alongFlight(ball, a) {
+  const v = Math.hypot(ball.vel.x, ball.vel.z) || 1;
+  return (a.pos.x * ball.vel.x + a.pos.z * ball.vel.z) / v;
+}
+
+/**
+ * Where a man going to the ball will be when it gets there: from where he
+ * is toward where it comes down, as far as he can run in the time left.
+ */
+export function meetPoint(a, target, eta) {
+  const dx = target.x - a.pos.x;
+  const dz = target.z - a.pos.z;
+  const d = Math.hypot(dx, dz);
+  const k = d > 1e-6 ? Math.min(1, (a.params.topSpeed * Math.max(eta, 0)) / d) : 0;
+  return { x: a.pos.x + dx * k, z: a.pos.z + dz * k };
 }
 
 /**

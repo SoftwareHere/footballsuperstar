@@ -275,6 +275,105 @@ describe('physical catches', () => {
     expect(planBallPlay(db, ball, null, { role: 'wr', foe: wr }).dive).toBe(false);
   });
 
+  // A ball from the quarterback to `target`, `eta` seconds from getting there.
+  const throwTo = (target, eta, flight = 1.3) => {
+    const ball = new Ball(0, 2.1, 7.5);
+    ball.throwTo({ x: 0, y: 2.1, z: 7.5 }, { y: 1.65, ...target }, flight);
+    while (ball.eta > eta) ball.step(SIM_DT);
+    return ball;
+  };
+  const placed = (x, z, vx, vz, ratings = {}) => {
+    const a = athlete(60, ratings);
+    a.pos.x = x;
+    a.pos.z = z;
+    a.vel.x = vx;
+    a.vel.z = vz;
+    return a;
+  };
+  // Press jump now with this plan and run to the moment his feet leave the turf.
+  const takeOff = (a, plan) => {
+    const intent = { x: 0, z: Math.sign(a.vel.z), sprint: true, jump: true, juke: 0 };
+    a.step(intent, SIM_DT, plan);
+    for (let i = 0; i < 60 && !a.airborne; i++) a.step({ ...intent, jump: false }, SIM_DT);
+    expect(a.airborne).toBe(true);
+    return a;
+  };
+  const towardBall = (a, ball) => {
+    const dx = ball.target.x - a.pos.x;
+    const dz = ball.target.z - a.pos.z;
+    return (a.vel.x * dx + a.vel.z * dz) / Math.hypot(dx, dz);
+  };
+
+  it('a corner who has got ahead of the receiver dives back into him when the ball comes down on his side', () => {
+    // The receiver has stopped and come back for it; the corner is on top of him, still drifting downfield.
+    const wr = placed(0.3, -15, 0, 3);
+    const db = placed(-0.3, -16.5, 0, -4);
+    const ball = throwTo({ x: 0.3, z: -15 + 3 * 0.6 }, 0.6);
+    const plan = planBallPlay(db, ball, null, { role: 'db', foe: wr });
+    expect(plan.dive).toBe(true);
+    expect(plan.atMan).toBe(true);
+    expect(plan.z).toBeGreaterThan(0.9); // back up the field, into him
+    takeOff(db, plan);
+    expect(towardBall(db, ball)).toBeGreaterThan(3);
+    // Not when he is keeping his feet.
+    expect(planBallPlay(db, ball, null, { role: 'db', foe: wr, safe: true }).atMan).toBeUndefined();
+
+    // Pressed too early to dive: he still goes up toward it, never away from it.
+    const early = placed(-0.3, -17.5, 0, -6);
+    const lob = throwTo({ x: 0.3, z: -15 + 3 * 0.9 }, 0.9);
+    const jump = planBallPlay(early, lob, null, { role: 'db', foe: placed(0.3, -15, 0, 3) });
+    expect(jump.dive).toBe(false);
+    takeOff(early, jump);
+    expect(towardBall(early, lob)).toBeGreaterThan(0);
+  });
+
+  it('a corner ahead of the receiver plays an overthrown ball that is closer to him', () => {
+    const wr = placed(0.3, -15, 0, -7.5);
+    const db = placed(-0.4, -16, 0, -7.5);
+    const ball = throwTo({ x: 0, z: -16 - 7.5 * 0.6 - 1 }, 0.6);
+    const plan = planBallPlay(db, ball, null, { role: 'db', foe: wr });
+    expect(plan.atMan).toBeUndefined();
+    takeOff(db, plan);
+    expect(towardBall(db, ball)).toBeGreaterThan(0);
+  });
+
+  it('a receiver whose defender is better placed goes up and toward the ball rather than laying out', () => {
+    // As in the contested ball above (a quick receiver would lay out), but the defender is under it.
+    const ball = new Ball(0, 2.1, 5);
+    ball.throwTo({ x: 0, y: 2.1, z: 5 }, { x: 0, y: 1.65, z: -10 }, 0.75);
+    while (ball.eta > 0.25) ball.step(SIM_DT);
+    const quick = { agility: 95, speed: 95, jumping: 40, strength: 40 };
+    const wr = placed(0, -8, 0, -7, quick);
+    const db = placed(0.3, -9.4, 0, -7);
+    const plan = planBallPlay(wr, ball, null, { role: 'wr', foe: db });
+    expect(plan.dive).toBe(false);
+    expect(plan.aggressive).toBe('highPoint');
+    expect(plan.attack).toBeGreaterThan(JUMP.attack);
+    // Out of jumping reach with the defender sitting on the spot: still no dive.
+    const low = ball.whenAt(DIVE.height);
+    const wide = placed(low.x + 2.4, low.z, 0, 0, quick);
+    expect(planBallPlay(wide, ball, null, { role: 'wr', foe: placed(0, -10, 0, 0) }).dive).toBe(false);
+    // With the defender nowhere near it, the same receiver lays out as before.
+    expect(planBallPlay(wide, ball, null, { role: 'wr', foe: placed(8, -4, 0, 0) }).dive).toBe(true);
+  });
+
+  it('a jump for a ball behind him never carries him away from it', () => {
+    // Running hard downfield; the ball is coming down three yards behind him, too far off to dive for yet.
+    for (const role of ['wr', 'db']) {
+      const a = placed(0, -15, 0, -8);
+      const ball = throwTo({ x: 0.5, z: -12 }, 1.0);
+      const plan = planBallPlay(a, ball, null, { role });
+      expect(plan.dive).toBe(false);
+      takeOff(a, plan);
+      expect(towardBall(a, ball)).toBeGreaterThanOrEqual(0);
+    }
+    // A ball out ahead of him in stride: his momentum carries him on to it, as before.
+    const a = placed(0, -15, 0, -8);
+    const ahead = throwTo({ x: 0, z: -22 }, 0.8);
+    takeOff(a, planBallPlay(a, ahead, null, { role: 'wr' }));
+    expect(a.vel.z).toBeLessThan(-5);
+  });
+
   it('a ball that hits him square is more likely to pop up alive', () => {
     expect(tipChance({ quality: 0.9, kind: 'attempt' })).toBeGreaterThan(tipChance({ quality: 0.1, kind: 'attempt' }));
     expect(tipChance({ quality: 1, kind: 'none' })).toBe(0);

@@ -158,8 +158,15 @@ export class Athlete {
     }
 
     if (this.gather > 0) {
-      // Legs loaded, feet still down: his momentum carries him over them.
+      // Legs loaded, feet still down: his momentum carries him over them,
+      // except where it is taking him away from the ball: there he plants.
       this.gather -= dt;
+      const away = this.awayFromBall(this.jumpPlan);
+      if (away) {
+        const take = Math.min(away.speed, p.cutRate * dt);
+        this.vel.x -= away.x * take;
+        this.vel.z -= away.z * take;
+      }
       this.pos.x += this.vel.x * dt;
       this.pos.z += this.vel.z * dt;
       this.clampToWorld();
@@ -281,6 +288,13 @@ export class Athlete {
       this.vel.z *= most / run;
     }
     const lines = this.plant();
+    // Going up for a ball behind him, he goes up and back for it: none of
+    // his momentum carries him away from it (what is across it, he keeps).
+    const away = this.awayFromBall(plan);
+    if (away) {
+      this.vel.x -= away.x * away.speed;
+      this.vel.z -= away.z * away.speed;
+    }
     const hang = (2 * this.vy) / GRAVITY;
     const t = clamp(plan.t - JUMP.load, 0.15, hang);
     let ax = (plan.x - this.pos.x) / t - this.vel.x;
@@ -302,6 +316,21 @@ export class Athlete {
     this.vel.z += az;
     this.want.x = this.vel.x;
     this.want.z = this.vel.z;
+  }
+
+  /**
+   * How fast he is moving away from where the ball he is going up for comes
+   * down, `plan` = { x, z }: { x, z } the direction away from it and `speed`,
+   * or null if he is not moving away from it (or he is already under it).
+   */
+  awayFromBall(plan) {
+    if (!plan || !Number.isFinite(plan.x)) return null;
+    const dx = this.pos.x - plan.x;
+    const dz = this.pos.z - plan.z;
+    const d = len2(dx, dz);
+    if (d < 0.2) return null;
+    const speed = (this.vel.x * dx + this.vel.z * dz) / d;
+    return speed > 1e-3 ? { x: dx / d, z: dz / d, speed } : null;
   }
 
   /**

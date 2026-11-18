@@ -8,7 +8,7 @@ export const LIGHTING = {
     label: 'Golden hour',
     key: { dir: [0.78, 0.3, 0.42], color: 0xffb877, intensity: 3.6 },
     fill: null,
-    hemi: { sky: 0x9fb6d8, ground: 0x5d4a2e, intensity: 0.32 },
+    hemi: { sky: 0x9fb6d8, intensity: 0.32 },
     env: 0.85,
     exposure: 0.98,
     fog: { color: 0xd8c3a2, near: 150, far: 760 },
@@ -35,7 +35,7 @@ export const LIGHTING = {
     // The four towers: the strongest one casts the shadows, the one across from it fills in.
     key: { dir: [-0.62, 0.62, 0.48], color: 0xeef3ff, intensity: 2.7 },
     fill: { dir: [0.66, 0.55, -0.5], color: 0xf6f3ff, intensity: 1.25 },
-    hemi: { sky: 0x30405e, ground: 0x0e130d, intensity: 0.22 },
+    hemi: { sky: 0x30405e, intensity: 0.22 },
     env: 1.1,
     exposure: 1.12,
     fog: { color: 0x161d29, near: 110, far: 560 },
@@ -62,7 +62,7 @@ export const LIGHTING = {
     label: 'Midday',
     key: { dir: [0.32, 0.86, 0.4], color: 0xfff5e8, intensity: 3.9 },
     fill: null,
-    hemi: { sky: 0xcfe2ff, ground: 0x4f653d, intensity: 0.42 },
+    hemi: { sky: 0xcfe2ff, intensity: 0.42 },
     env: 1.0,
     exposure: 0.88,
     fog: { color: 0xc4d8ea, near: 190, far: 860 },
@@ -87,3 +87,13 @@ export const LIGHTING = {
 };
 
 export const LIGHTING_NAMES = Object.keys(LIGHTING);
+
+/**
+ * Light coming back up off the turf, onto everything that faces down: under
+ * the arms, the crotch, a man laid out in a dive. The turf is left out of the
+ * reflection picture (a whole hemisphere of it would turn every white uniform
+ * green), so the hemisphere light's ground half stands in for it, worked out
+ * from what the key and fill put on the turf. `albedo` is how much of that the
+ * grass sends back; `tint` (linear) keeps it only a little green.
+ */
+export const TURF_BOUNCE = { albedo: 0.18, tint: [0.92, 1.06, 0.86] };

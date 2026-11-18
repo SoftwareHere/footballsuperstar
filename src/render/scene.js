@@ -10,13 +10,18 @@ import { AthleteModel } from './athleteModel.js';
 import { BallModel } from './ballModel.js';
 import { Markers } from './markers.js';
 import { CameraRig } from './cameraRig.js';
-import { LIGHTING } from './lighting.js';
+import { LIGHTING, TURF_BOUNCE } from './lighting.js';
 import { Pipeline } from './pipeline.js';
 
 export const USER_COLORS = { jersey: 0x1e6bff, trim: 0xffffff, helmet: 0xf4f6fa, pants: 0xf4f6fa };
 const QB_COLORS = { jersey: 0xff7a1a, trim: 0x1b1b1f, helmet: 0xe9e9ee, pants: 0x2b2f36, skin: 0xc68c5a };
 
 const mix = (a, b, t) => a + (b - a) * t;
+const fillDir = new THREE.Vector3();
+
+// Shadow lookups are pushed out along the surface by about this many shadow-map
+// texels, so a body does not shadow itself in speckles and bands.
+const NORMAL_BIAS = 1.0;
 
 /**
  * Picture quality, cheapest first. The game picks a starting tier from the
@@ -103,7 +108,7 @@ export class SceneView {
     scene.add(this.hemi);
     const sun = (this.sun = new THREE.DirectionalLight(0xffe7bf, 3));
     sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.025;
+    sun.shadow.normalBias = 0.025; // set from the texel size (fitShadowBias)
     sun.shadow.radius = 2;
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 220;
@@ -179,6 +184,7 @@ export class SceneView {
       sun.shadow.map = null;
     }
     sun.castShadow = shadows;
+    this.fitShadowBias();
     this.fx.blobStrength = shadows ? 0.55 : 1;
     this.field.setQuality(t.pbr);
     this.usePost = t.post && this.post !== null;
@@ -202,9 +208,15 @@ export class SceneView {
     } else {
       this.fill.visible = false;
     }
-    this.hemi.color.setHex(L.hemi.sky);
-    this.hemi.groundColor.setHex(L.hemi.ground);
-    this.hemi.intensity = L.hemi.intensity;
+    // The sky half as the preset has it; the ground half is the light the
+    // key and fill put on the turf, coming back up off it.
+    this.hemi.intensity = 1;
+    this.hemi.color.setHex(L.hemi.sky).multiplyScalar(L.hemi.intensity);
+    let onTurf = L.key.intensity * Math.max(0, this.sunDir.y);
+    if (L.fill) onTurf += L.fill.intensity * Math.max(0, fillDir.set(...L.fill.dir).normalize().y);
+    const bounce = TURF_BOUNCE.albedo * onTurf;
+    const [tr, tg, tb] = TURF_BOUNCE.tint;
+    this.hemi.groundColor.setRGB(tr * bounce, tg * bounce, tb * bounce, THREE.LinearSRGBColorSpace);
     this.scene.environmentIntensity = L.env;
     this.scene.fog.color.setHex(L.fog.color);
     this.scene.fog.near = L.fog.near;
@@ -302,11 +314,19 @@ export class SceneView {
       cam.left = cam.bottom = -half;
       cam.right = cam.top = half;
       cam.updateProjectionMatrix();
+      this.fitShadowBias();
     }
     const d = this.sunDir;
     this.sun.position.set(cx + d.x * 90, d.y * 90, cz + d.z * 90);
     this.sun.target.position.set(cx, 0, cz);
     if (this.fill.visible) this.fill.target.position.set(cx, 0, cz);
+  }
+
+  /** Size the shadow's normal offset to one texel of the shadow map as it is now. */
+  fitShadowBias() {
+    const size = this.sun.shadow.mapSize.x;
+    if (!this.shadowHalf || !size) return;
+    this.sun.shadow.normalBias = Math.max(0.02, (NORMAL_BIAS * 2 * this.shadowHalf) / size);
   }
 
   /** Repaint the stadium scoreboard when the score changes. */
