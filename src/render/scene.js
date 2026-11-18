@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { QB, BODY_RADIUS, JUMP, GRAVITY } from '../config.js';
+import { QB, BODY_RADIUS, JUMP, GRAVITY, TOE } from '../config.js';
 import { P } from '../physics/body.js';
 import { angleDelta } from '../core/vec.js';
 import { createField } from './field.js';
@@ -122,7 +122,7 @@ export class SceneView {
     this.scoreKey = '';
     this.fx = new Effects();
     scene.add(this.fx.group);
-    this.fxState = { wr: { air: false, wait: 0 }, db: { air: false, wait: 0 } };
+    this.fxState = { wr: { air: false, wait: 0, feet: null }, db: { air: false, wait: 0, feet: null } };
 
     this.userModel = new AthleteModel(USER_COLORS, 1, detail);
     this.rivalModel = new AthleteModel({ jersey: 0xc8102e, trim: 0xffffff, helmet: 0x222222, pants: 0x222222, skin: 0x6b4226 }, 2, detail);
@@ -148,7 +148,8 @@ export class SceneView {
     this.focus = { x: 0, y: 0, z: 0, speed: 0 };
     this.tmp = new THREE.Vector3();
     // Where each player's chest and shoulders are, for the other man's hands.
-    this.bodies = [0, 1].map(() => ({ chest: new THREE.Vector3(), sh: [new THREE.Vector3(), new THREE.Vector3()] }));
+    this.bodies = [0, 1].map(() => ({ chest: new THREE.Vector3(), sh: [new THREE.Vector3(), new THREE.Vector3()], legs: new THREE.Vector3() }));
+    this.knee = new THREE.Vector3();
     this.ballPos = { x: 0, y: 0, z: 0 };
     this.throwClock = 0;
     this.time = 0;
@@ -324,8 +325,19 @@ export class SceneView {
     fx.blob(index, pelvis.x, pelvis.z, Math.max(0, pelvis.y - (a.down ? 0.2 : 1.0)), a.down ? 1.7 : 1.25);
     st.wait = Math.max(0, st.wait - dt);
     const off = a.airborne || (a.down && a.y > 0.05);
-    if (st.air && !off && !a.down) fx.burst(a.pos.x, a.pos.z, 10, a.vel.x, a.vel.z, 0.8); // landed on his feet
+    if (a.feetDown && a.feetDown !== st.feet && !a.airborne) {
+      // Landed: turf thrown up where each foot came down (more of it when he dragged them in).
+      st.feet = a.feetDown;
+      for (const f of a.feetDown) fx.burst(f.x, f.z, a.dragged ? 9 : 5, a.vel.x, a.vel.z, a.dragged ? 0.9 : 0.6);
+    } else if (st.air && !off && !a.down) {
+      fx.burst(a.pos.x, a.pos.z, 10, a.vel.x, a.vel.z, 0.8); // landed on his feet
+    }
     st.air = off;
+    if (a.toeDrag > 0 && a.feetDown && st.wait <= 0) {
+      // Toes dragging the turf.
+      for (const f of a.feetDown) fx.burst(f.x, f.z, 3, a.vel.x * 0.5, a.vel.z * 0.5, 0.5);
+      st.wait = 0.04;
+    }
     if (model.impact > 2.2) {
       // A body hitting the turf.
       fx.burst(pelvis.x, pelvis.z, Math.min(40, Math.round(model.impact * 5)), a.vel.x, a.vel.z, 1.2);
@@ -351,7 +363,10 @@ export class SceneView {
   cut() {
     this.rig.cut();
     for (const m of [this.userModel, this.rivalModel, this.qbModel]) m.reset();
-    for (const st of Object.values(this.fxState)) st.air = false;
+    for (const st of Object.values(this.fxState)) {
+      st.air = false;
+      st.feet = null;
+    }
   }
 
   /**
@@ -390,6 +405,12 @@ export class SceneView {
       securing: a.securing,
       mood: a.mood,
       catchType: a.catchInfo ? a.catchInfo.type : null,
+      // Feet by the line: reaching for the turf, where they came down, and the toes dragging in.
+      toeReach: a.toeReach,
+      feetDown: a.feetDown,
+      toeDrag: a.toeDrag > 0 ? a.toeDrag / TOE.drag : 0,
+      diveKind: a.diving ? a.diveKind : null,
+      aggressive: a.aggressive,
       throwing: null,
       ...extra,
     };
@@ -400,6 +421,8 @@ export class SceneView {
     model.point(P.CHEST, out.chest);
     model.point(P.SH_L, out.sh[0]);
     model.point(P.SH_R, out.sh[1]);
+    model.point(P.KN_L, out.legs);
+    out.legs.add(model.point(P.KN_R, this.knee)).multiplyScalar(0.5);
     return out;
   }
 
@@ -429,7 +452,10 @@ export class SceneView {
       const other = rep[role === 'wr' ? 'db' : 'wr'];
       const foe = this.bodyOf(modelOf(role === 'wr' ? 'db' : 'wr'), this.bodies[role === 'wr' ? 0 : 1]);
       let lookAt = null;
-      if (live || sim.state === 'loose') lookAt = bp;
+      if (a.toeDrag > 0 && a.feetDown) {
+        // Eyes on his feet: are they in?
+        lookAt = { x: (a.feetDown[0].x + a.feetDown[1].x) / 2, y: 0.05, z: (a.feetDown[0].z + a.feetDown[1].z) / 2 };
+      } else if (live || sim.state === 'loose') lookAt = bp;
       else if (role === 'db' && rep.phase !== 'done') lookAt = { x: other.pos.x, y: 1.7, z: other.pos.z };
       else if (role === 'wr' && pre) lookAt = { x: a.pos.x, y: 1.6, z: a.pos.z - 8 };
       states[role] = this.athleteState(a, was ? was[role] : null, alpha, {
@@ -438,7 +464,8 @@ export class SceneView {
         lookAt,
         foe,
         catcher: role === 'wr',
-        obstacle: other.down ? null : { x: other.pos.x, z: other.pos.z, radius: BODY_RADIUS * 0.85, top: 1.85 },
+        // A man on the turf is still in the way, low down: a pile-up does not sink into itself.
+        obstacle: other.down ? { x: other.pos.x, z: other.pos.z, radius: 0.32, top: 0.32 } : { x: other.pos.x, z: other.pos.z, radius: BODY_RADIUS * 0.85, top: 1.85 },
       });
     }
     const userState = states[userRole];

@@ -89,7 +89,7 @@ describe('after the catch', () => {
       }
       endings.add(result.endedBy);
       expect(result.touchdown).toBe(result.reason === 'touchdown');
-      expect(['endzone', 'wrap', 'hit', 'dive', 'oob', 'pushed', 'down', 'whistle']).toContain(result.endedBy);
+      expect(['endzone', 'wrap', 'hit', 'dive', 'stretch', 'oob', 'pushed', 'down', 'whistle']).toContain(result.endedBy);
       if (log.includes('caught')) {
         runs += 1;
         expect(result.yac).toBeGreaterThanOrEqual(0);
@@ -138,7 +138,8 @@ describe('after the catch', () => {
     // The ball crossed before he came down: his body may still be short of the line.
     const short = dive(FIELD.goalZ + 9);
     expect(short.result.touchdown).toBe(false);
-    expect(short.result.endedBy).toBe('dive');
+    expect(short.result.endedBy).toBe('stretch');
+    expect(over.result.stretched).toBe(true);
     expect(short.wr.down).toBe(true);
     expect(short.result.endYard).toBeGreaterThan(1);
     expect(short.result.endYard).toBeLessThan(7.5);

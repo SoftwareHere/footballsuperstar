@@ -167,6 +167,8 @@ const state = (page) =>
       eta: r.ball.eta,
       reps: g.match.history.length,
       callText: document.querySelector('.tp-call b').textContent,
+      jumpText: document.querySelector('.tp-jump').textContent,
+      him: { x: (g.role === 'wr' ? r.db : r.wr).pos.x, z: (g.role === 'wr' ? r.db : r.wr).pos.z },
     };
   });
 
@@ -232,6 +234,17 @@ async function play(page, cdp) {
           await fingers.tap(5, jump.x, jump.y);
           jumped = true;
         }
+      } else if (s.phase === 'run') {
+        // After the catch: run for the end zone, or run him down.
+        if (!tested.run) {
+          check(s.jumpText === 'DIVE', 'the jump button reads DIVE after the catch');
+          tested.run = true;
+        }
+        const to = s.role === 'wr' ? { x: s.me.x, z: s.me.z - 5 } : s.him;
+        const dx = to.x - s.me.x;
+        const dz = to.z - s.me.z;
+        const len = Math.hypot(dx, dz) || 1;
+        await fingers.move(1, stick.x + (dx / len) * 50, stick.y + (dz / len) * 50);
       }
       await sleep(25);
     }

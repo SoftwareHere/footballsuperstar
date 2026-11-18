@@ -93,10 +93,6 @@ export class Athlete {
     return len2(this.vel.x, this.vel.z);
   }
 
-  get inBounds() {
-    return Math.abs(this.pos.x) <= FIELD.halfWidth && this.pos.z >= FIELD.endZ;
-  }
-
   /** 1 at the start of a stumble, 0 once he has his feet back. */
   get stumbling() {
     return this.stumble > 0 && this.stumbleFor > 0 ? this.stumble / this.stumbleFor : 0;

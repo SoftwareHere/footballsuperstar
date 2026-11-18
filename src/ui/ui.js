@@ -12,10 +12,12 @@ const HINTS = {
   'wr:presnap': `${key('Space')} Snap the ball`,
   'wr:live': `${key('WASD')} Run past his shoulder ${key('Shift')} Sprint ${key('Q')}${key('E')} Juke out of his hands ${key('Enter')} Call for the ball`,
   'wr:called': `${key('WASD')} Keep running: he leads you ${key('Shift')} Sprint`,
-  'wr:flight': `Get to the ring ${key('Space')} Jump, or dive if it is out of reach`,
+  'wr:flight': `Get to the ring ${key('Space')} Go get it: jump, or dive if it is out of reach`,
+  'wr:run': `Get to the end zone ${key('Shift')} Sprint ${key('Q')}${key('E')} Make him miss ${key('Space')} Dive for the goal line`,
   'db:presnap': `${key('WASD')} Set your cushion ${key('Space')} Ready`,
   'db:live': `${key('WASD')} Jam him from in front, ride him from behind ${key('Shift')} Sprint ${key('Q')}${key('E')} Break step`,
-  'db:flight': `Get to the ring ${key('Space')} Jump or dive to swat, or run through him`,
+  'db:flight': `Get to the ring ${key('Space')} Jump or dive to swat, or lay out at him`,
+  'db:run': `Bring him down: run through him ${key('Shift')} Sprint ${key('Space')} Dive at his legs`,
   done: `${key('Space')} Next rep`,
 };
 
@@ -26,16 +28,18 @@ const TOUCH_HINTS = {
   'wr:live': `Run past his shoulder ${pad('CUT')} Juke ${pad('CALL')} Call for it`,
   'wr:called': `Keep running: he leads you`,
   'wr:flight': `Get to the ring ${pad('JUMP')} Jump or dive`,
+  'wr:run': `Get to the end zone ${pad('CUT')} Make him miss ${pad('DIVE')} Dive for the line`,
   'db:presnap': `Set your cushion ${pad('READY')} Ready`,
   'db:live': `Jam him from in front, ride him from behind`,
-  'db:flight': `Get to the ring ${pad('JUMP')} Swat it, or run through him`,
+  'db:flight': `Get to the ring ${pad('JUMP')} Swat it, or lay out at him`,
+  'db:run': `Bring him down: run through him ${pad('DIVE')} Dive at his legs`,
   done: `${pad('NEXT')} Next rep`,
 };
 
 const TOUCH_CONTROLS = [
   ['Move: push a little to jog', 'left stick'],
   ['Sprint (uses your sprint tank)', `hold ${pad('SPRINT')}`],
-  ['Jump, or dive when it is out of reach', pad('JUMP')],
+  ['Jump, or dive when it is out of reach. After the catch: dive for the goal line, or at his legs', pad('JUMP')],
   ['Juke / quick break step', `${pad('CUT')} ${pad('CUT')}`],
   ['Snap before the play, call for the ball after it', pad('CALL')],
   ['Pause, camera', 'top corners'],
@@ -45,6 +49,7 @@ const CONTROLS = [
   ['Move', `${key('W')}${key('A')}${key('S')}${key('D')} or arrow keys`],
   ['Sprint (uses your sprint tank)', `hold ${key('Shift')}`],
   ['Play the ball: jump, or dive when it is out of reach', key('Space')],
+  ['After the catch: dive for the goal line, or at his legs to tackle', key('Space')],
   ['Juke / quick break step left, right', `${key('Q')} ${key('E')}`],
   ['Call for the ball (offense), with your right hand', key('Enter')],
   ['Snap / ready / next rep', `${key('Space')} or ${key('Enter')}`],
@@ -225,7 +230,7 @@ export class UI {
       `<div class="panel menu">
         <div class="menu-head">
           <div class="logo"><span>FOOTBALL</span><b>SUPERSTAR</b></div>
-          <p class="tagline">1-on-1s. You against him, both ways. First to the number wins.</p>
+          <p class="tagline">1-on-1s. You against him, both ways. Catches are 1, touchdowns and picks are 3. First to the number wins.</p>
           ${this.playerCard(career)}
         </div>
         <div class="buttons">
@@ -351,10 +356,12 @@ export class UI {
         <div class="how">
           <ul class="rules">
             <li><b>Both ways.</b> You and your rival trade off. With the ball you are the receiver; without it you are the corner.</li>
-            <li><b>Scoring.</b> A completion is a point for the receiver. An incompletion is a point for the defender. Possession flips after every point.</li>
+            <li><b>Scoring.</b> A catch is 1 point for the receiver, and taking it into the end zone is a touchdown: 3. An incompletion is 1 for the defender, and an interception is 3. Possession flips after every rep.</li>
+            <li><b>After the catch.</b> The play is not over: run for the end zone. On defense you have to bring him down: run through him to tackle (from in front is best), or ${t ? 'tap' : 'press'} ${jumpKey} to dive at his legs. A tackle can be broken, and a juke makes him miss. With the ball, ${jumpKey} dives for the goal line: if the ball gets across before you land, it is a touchdown.</li>
+            <li><b>Feet in bounds.</b> Catch it in the air and you have to come down with both feet in bounds (or your body, if you dove). Near the sideline or the end line your player plants and drags his toes in on his own: agility and hands decide how far over the line he can still get them down.</li>
             <li><b>Offense is freestyle.</b> No plays. Run anything, then ${t ? 'tap' : 'press'} ${callKey} to call for the ball. The QB leads you from your speed and direction, so call it coming out of your break.</li>
             <li><b>${QB.deadline}-second pressure.</b> Nobody calls for it in ${QB.deadline} seconds? The QB throws anyway.</li>
-            <li><b>The ring.</b> A yellow ring shows where the ball comes down. A white ring closes on it as the ball arrives: be there and ${t ? 'tap' : 'press'} ${jumpKey}. Too far away to jump for it? ${jumpKey} lays you out in a dive instead.</li>
+            <li><b>The ring.</b> A yellow ring shows where the ball comes down. A white ring closes on it as the ball arrives: be there and ${t ? 'tap' : 'press'} ${jumpKey}. Too far away to jump for it? ${jumpKey} lays you out in a dive instead. With the other man right on you and the ball coming in stride, you play it hard on your own: a layout or a high-point, whichever your ratings are best at. On defense, a ball you cannot reach turns your dive on the man.</li>
             <li><b>Hands.</b> Get within arm's reach and the hands come up on their own. A corner squared up in front of the receiver jams him: a punch to the chest, then hands that hold him up while he fights to a shoulder. A corner who is beaten or trailing and runs into the receiver stays on him and rides him, which costs the receiver speed and footwork. Strength decides who wins it, and a juke is the quickest way out. Contact never makes anybody faster.</li>
             <li><b>It is physical.</b> A ball off the hands can pop up and stay live: the ring turns orange and anybody can come down with it. And a catch is not safe until it is finished. A defender who arrives with the ball can jar it loose, so on defense, run through the receiver. A hit costs balance: you stumble, and a big enough one puts you on the turf.</li>
             <li><b>Level up.</b> Every game earns XP. Spend skill points on stats that work on both sides of the ball.</li>
@@ -447,7 +454,9 @@ export class UI {
         <div class="final">You <b>${score.user}</b> - <b>${score.rival}</b> ${esc(rival.name)} <small>first to ${target}</small></div>
         <div class="tallies">
           <span>Catches <b>${summary.catches}/${summary.targets}</b></span>
+          <span>TDs <b>${summary.touchdowns}</b></span>
           <span>Stops <b>${summary.stops}/${summary.defended}</b></span>
+          <span>Tackles <b>${summary.tackles}</b></span>
           <span>Picks <b>${summary.picks}</b></span>
         </div>
         <div class="xp-lines">${lines}<div class="row total"><span>Total</span><b>+${reward.xp.total} XP</b></div></div>

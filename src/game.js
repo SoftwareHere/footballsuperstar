@@ -13,6 +13,7 @@ import { SceneView } from './render/scene.js';
 import { Sfx } from './audio/sfx.js';
 import { UI } from './ui/ui.js';
 import { TouchControls } from './ui/touch.js';
+import { describePlay, CATCH_TITLES } from './ui/playText.js';
 
 /** Turns the keyboard or touch controls into an athlete's intent. Same controls in both roles. */
 class UserController {
@@ -52,26 +53,6 @@ class UserController {
     return out;
   }
 }
-
-const REASON_TEXT = {
-  catch: 'Caught it',
-  drop: 'Dropped',
-  breakup: 'Broken up at the catch',
-  swat: 'Swatted away',
-  int: 'Picked off',
-  ground: 'Nobody got there',
-  oob: 'Caught out of bounds',
-  hit: 'Jarred loose by the hit',
-};
-
-// How the catch was made, when it was something worth shouting about.
-const CATCH_TITLES = {
-  dive: 'DIVING CATCH!',
-  oneHand: 'ONE-HANDED!',
-  overShoulder: 'OVER THE SHOULDER!',
-  juggle: 'JUGGLING CATCH!',
-  low: 'SHOESTRING CATCH!',
-};
 
 const CAMERA_NAMES = { follow: 'FOLLOW CAM', broadcast: 'BROADCAST CAM', lock: 'CINEMATIC CAM' };
 
@@ -347,6 +328,35 @@ export class Game {
         this.sfx.play('catch');
         this.heardCatch = true;
         break;
+      case 'pick':
+        this.sfx.play('catch');
+        this.heardCatch = true;
+        break;
+      case 'caught': {
+        // The catch is made, short of the end zone: now it is a run.
+        const title = e.toeTap ? 'TOE-TAP!' : CATCH_TITLES[e.catchType] || 'CAUGHT!';
+        if (offense) ui.banner(title, 'Now take it to the house!', 'good', 1.2);
+        else ui.banner(e.toeTap ? 'TOE-TAP' : 'HE CAUGHT IT', 'Bring him down!', 'warn', 1.2);
+        if (e.toeTap) this.slowmo = 0.3;
+        break;
+      }
+      case 'wrap':
+        this.sfx.play('bump');
+        this.view.rig.shake(0.06);
+        break;
+      case 'tackle':
+        this.sfx.play('hit');
+        this.view.rig.shake(e.kind === 'hit' ? Math.min(0.3, 0.08 + (e.power || 0) * 0.015) : 0.12);
+        if (e.kind === 'hit' || e.kind === 'dive') this.slowmo = 0.3;
+        break;
+      case 'broken': {
+        // He slipped a tackle.
+        const titles = { juke: 'MADE HIM MISS!', shed: 'BROKE THE TACKLE!', trip: 'STAYED ON HIS FEET!', miss: 'BROKE A TACKLE!' };
+        this.sfx.play(e.kind === 'juke' ? 'juke' : 'bump');
+        if (offense) ui.banner(titles[e.kind] || 'BROKE A TACKLE!', 'Keep going!', 'good', 0.9);
+        else ui.banner('MISSED TACKLE', 'Get after him!', 'bad', 0.9);
+        break;
+      }
       case 'tip':
         this.sfx.play('tip');
         ui.banner('TIPPED!', 'Still live. Go get it.', 'warn', 0.9);
@@ -382,29 +392,19 @@ export class Game {
 
   showResult(entry) {
     const mine = entry.scorer === 'user';
-    const offense = entry.userRole === 'wr';
-    let title;
-    if (entry.complete) {
-      if (!offense) title = 'CAUGHT';
-      else if (entry.throughContact) title = 'HELD ON THROUGH THE HIT!';
-      else if (entry.toeTap) title = 'TOE-TAP!';
-      else title = CATCH_TITLES[entry.catchType] || 'COMPLETE!';
-    } else if (entry.reason === 'int') title = entry.tips ? 'PICKED OFF THE TIP!' : 'INTERCEPTED!';
-    else if (entry.reason === 'hit') title = 'JARRED LOOSE!';
-    else if (entry.reason === 'swat' || entry.reason === 'breakup') title = offense ? 'BROKEN UP' : 'PASS BROKEN UP!';
-    else title = 'INCOMPLETE';
-    const who = mine ? 'YOU' : this.rival.name.split(' ')[1].toUpperCase();
-    let detail;
-    if (entry.complete) detail = `${Math.max(0, Math.round(entry.depth))} yards downfield`;
-    else if (entry.lostToGround) detail = 'Lost it going to the ground';
-    else if (entry.tips && entry.reason !== 'int') detail = 'Tipped, and nobody came down with it';
-    else detail = REASON_TEXT[entry.reason];
-    this.ui.banner(title, `${detail} · +1 ${who}`, mine ? 'good' : 'bad', REP.resultLinger + 0.4);
+    const { title, detail } = describePlay(entry, { rival: this.rival.name.split(' ')[1] });
+    this.ui.banner(title, detail, mine ? 'good' : 'bad', REP.resultLinger + 0.6);
     // The grab itself was already heard when the ball hit his hands.
-    if (!entry.complete) this.sfx.play('thud');
+    if (!entry.complete && entry.reason !== 'int') this.sfx.play('thud');
     else if (!this.heardCatch) this.sfx.play('catch');
+    if (entry.touchdown) this.sfx.play('touchdown');
     // A beat of slow motion for the spectacular ones.
-    if (entry.complete && (entry.catchType === 'dive' || entry.catchType === 'oneHand' || entry.throughContact)) this.slowmo = 0.35;
+    const special =
+      entry.touchdown ||
+      (entry.complete && (entry.catchType === 'dive' || entry.catchType === 'oneHand' || entry.throughContact || entry.toeTap)) ||
+      entry.reason === 'int' ||
+      entry.endedBy === 'dive';
+    if (special) this.slowmo = Math.max(this.slowmo, 0.35);
     this.sfx.play(mine ? 'cheer' : 'groan');
     this.sfx.play('whistle');
   }

@@ -928,7 +928,7 @@ export class Rep {
     const wr = this.wr;
     if (this.brokePlane()) return this.endRun(true, 'endzone');
     if (!spotInBounds(wr.pos)) return this.endRun(false, wr.sinceContact < 0.5 ? 'pushed' : 'oob');
-    if (wr.down) return this.endRun(false, run.tackledBy || (wr.diveKind === 'carry' ? 'dive' : 'down'));
+    if (wr.down) return this.endRun(false, run.tackledBy || (wr.diveKind === 'carry' ? 'stretch' : 'down'));
     if (run.t >= RUN.maxTime) return this.endRun(false, 'whistle');
     return undefined;
   }
@@ -942,6 +942,7 @@ export class Rep {
       ...run.info,
       touchdown,
       endedBy,
+      stretched: this.wr.diving && this.wr.diveKind === 'carry', // dove for it
       endYard: touchdown ? 0 : yardLine(spotZ),
       yac: Math.max(0, run.startZ - spotZ),
       brokenTackles: run.broken,

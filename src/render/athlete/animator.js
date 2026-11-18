@@ -61,6 +61,12 @@ const e1 = new THREE.Euler(0, 0, 0, 'YXZ');
  *     chest and then onto his hip and back as he rides him, a receiver's to
  *     the shoulder he is fighting past or back at the hands that are on him.
  *   - Knocked off balance he stumbles: ragged, wide steps, arms out.
+ *   - Coming down by a line he reaches his toes for the turf, puts them down
+ *     exactly where the game says they came down, and drags them, leaning
+ *     out, eyes on his feet.
+ *   - A tackler wraps his arms round the runner's hips; a man laid out at a
+ *     runner's legs reaches for them; a ball carrier diving for the goal
+ *     line stretches the ball out ahead of him in both hands.
  */
 export class Animator {
   constructor(rig) {
@@ -111,6 +117,10 @@ export class Animator {
     this.wasStumble = 0;
     this.socket = new THREE.Vector3(); // where a ball he is holding sits, world
     this.socketDir = new THREE.Vector3(0, 0, 1);
+    this.toeK = 0; // legs reaching for the turf by a line
+    this.feetRef = null; // the last landing's feet, so each is planted once
+    this.lastX = 0;
+    this.lastZ = 0;
     this.started = false;
     // Scratch world rotations down the chain.
     this.wPelvis = new THREE.Quaternion();
@@ -146,6 +156,10 @@ export class Animator {
     this.wasStumble = 0;
     this.headYaw = 0;
     this.headPitch = 0;
+    this.toeK = 0;
+    this.feetRef = s.feetDown || null;
+    this.lastX = s.x;
+    this.lastZ = s.z;
     const sinF = Math.sin(s.facing);
     const cosF = Math.cos(s.facing);
     this.legs.forEach((leg, i) => {
@@ -219,6 +233,8 @@ export class Animator {
     // 1 leaving the turf, 0 at the top, -1 coming back down.
     const flight = air ? clamp((s.vy || 0) / v0, -1, 1) : 0;
     const stumble = clamp(s.stumble || 0, 0, 1);
+    const toeDrag = grounded ? clamp(s.toeDrag || 0, 0, 1) : 0;
+    this.toeK = damp(this.toeK, air ? clamp(s.toeReach || 0, 0, 1) : 0, 14, dt);
     const hands = s.hands && s.foe ? s.hands : null;
     this.handK = damp(this.handK, hands ? hands.k : 0, 14, dt);
     this.handOn = damp(this.handOn, hands && hands.on ? 1 : 0, hands && hands.on ? 22 : 12, dt);
@@ -255,10 +271,12 @@ export class Animator {
     if (hands) {
       // Hands on a man: sunk a little and leaning into him. A receiver with
       // a man hanging on his back is pulled up out of his lean instead.
-      const into = { release: 0.14, jam: 0.18, check: 0.1, ride: 0.16, ridden: -0.14 }[hands.kind] ?? 0.1;
+      const into = { release: 0.14, jam: 0.18, check: 0.1, ride: 0.16, ridden: -0.14, wrap: 0.34, wrapped: 0.24 }[hands.kind] ?? 0.1;
       leanT += into * handK * (hands.kind === 'ridden' ? this.handOn : 1);
       if (hands.kind === 'jam') crouch += 0.1 * handK;
       else if (hands.kind === 'check' || hands.kind === 'ride') crouch += 0.06 * handK;
+      else if (hands.kind === 'wrap') crouch += 0.2 * handK; // low, under his pads
+      else if (hands.kind === 'wrapped') crouch += 0.07 * handK; // churning
     }
     // The moment the hands land: the corner throws his weight into the
     // punch, and the receiver is rocked back by it.
@@ -273,11 +291,23 @@ export class Animator {
         this.lean.v += 1.6;
       } else if (hands.kind === 'ridden') {
         this.lean.v -= 2;
+      } else if (hands.kind === 'wrap') {
+        this.lean.v += 2.6; // driving through him
+        this.drop.v -= 0.9;
+      } else if (hands.kind === 'wrapped') {
+        this.lean.v -= 2.2; // rocked back by it
       }
     }
     this.hadHandOn = landed;
     // Catching his balance: bent over it, low.
     leanT += 0.36 * stumble;
+    // Toes dragging the turf: his body carries on over the line while his feet stay in.
+    let dragBank = 0;
+    if (toeDrag > 0 && speed > 0.3) {
+      leanT += 0.3 * toeDrag * (vF / speed);
+      dragBank = -0.32 * toeDrag * ((vx * cosF - vz * sinF) / speed);
+      crouch += 0.08 * toeDrag;
+    }
     crouch += 0.1 * stumble + 0.14 * clamp(s.landing || 0, 0, 1);
     if (s.throwing !== null && s.throwing !== undefined) leanT = s.throwing < 1 ? -0.1 : 0.22;
     if (loading) leanT = 0.32 * Math.sin(Math.PI * Math.min(1, load * 1.3)); // hinges over as the legs load
@@ -296,7 +326,7 @@ export class Animator {
       this.drop.v -= 1.2;
     }
     this.wasStumble = stumble;
-    let bankT = -0.018 * aL * (0.4 + 0.6 * amp) + 0.2 * stumble * Math.sin(this.time * 15);
+    let bankT = -0.018 * aL * (0.4 + 0.6 * amp) + 0.2 * stumble * Math.sin(this.time * 15) + dragBank;
     if (hands && hands.kind === 'release') {
       // Dips the shoulder nearer the man and slides by.
       const foeLeft = (s.foe.chest.x - s.x) * cosF - (s.foe.chest.z - s.z) * sinF;
@@ -315,7 +345,24 @@ export class Animator {
     const dip = loading ? -((v0 * JUMP.load) / (1.15 * Math.PI)) * Math.sin(Math.PI * Math.pow(load, 1.15)) : 0;
 
     // ---- feet
-    this.stepFeet(dt, s, speed, amp, vF, sinF, cosF, grounded, loading, stumble);
+    if (s.feetDown && s.feetDown !== this.feetRef) {
+      // He has just come down: his feet go exactly where the game says they did.
+      this.feetRef = s.feetDown;
+      if (grounded) {
+        this.legs.forEach((leg, i) => {
+          leg.pos.set(s.feetDown[i].x, 0, s.feetDown[i].z);
+          leg.planted = true;
+          leg.relative = false;
+          leg.stepT = 0;
+          leg.lift = 0;
+          leg.ground = Math.max(leg.ground, toeDrag > 0 ? 0.8 : 0.5);
+        });
+      }
+    }
+    if (toeDrag > 0) this.dragFeet(dt, s);
+    else this.stepFeet(dt, s, speed, amp, vF, sinF, cosF, grounded, loading, stumble);
+    this.lastX = s.x;
+    this.lastZ = s.z;
     // +1 as the left foot lands out in front, -1 as the right one does.
     const swingFrac = this.swingFrac(speed, amp, this.freq || 1);
     const striding = grounded && !loading && speed > 0.4;
@@ -396,6 +443,22 @@ export class Animator {
     const reach = JUMP.load * 0.62; // he is over it a little past halfway through the load
     j.from.copy(leg.pos);
     j.to.set(s.x + (s.vx || 0) * reach + cosF * side * B.hipWidth * 0.8, 0, s.z + (s.vz || 0) * reach - sinF * side * B.hipWidth * 0.8);
+  }
+
+  /** Toes dragging the turf: planted where they came down, scraping along a little with him, up on the toes. */
+  dragFeet(dt, s) {
+    const mx = s.x - this.lastX;
+    const mz = s.z - this.lastZ;
+    for (const leg of this.legs) {
+      leg.planted = true;
+      leg.relative = false;
+      leg.stepT = 0;
+      leg.lift = 0;
+      leg.pos.x += mx * 0.3;
+      leg.pos.z += mz * 0.3;
+      leg.pitch = damp(leg.pitch, 0.8, 30, dt);
+      leg.ground = damp(leg.ground, 1, 30, dt);
+    }
   }
 
   /** Feet while the legs load: planted, with the body carried over them. */
@@ -567,6 +630,8 @@ export class Animator {
         // Laid out, or tumbling: lead knee up, trail leg long.
         v2.set(side * B.hipWidth * 1.1, lerp(-0.86, -0.62, lead), lerp(-0.22, 0.2, lead));
       }
+      // By a line, both legs reach long for the turf, toes down, trailing behind him.
+      if (this.toeK > 0.01) v2.lerp(v3.set(side * B.hipWidth * 0.85, -0.99, -0.2), this.toeK);
       if (diveK > 0.01) v2.lerp(v3.set(side * B.hipWidth * 1.3, -0.93, lerp(-0.12, 0.06, lead)), diveK);
       leg.air.x = damp(leg.air.x, v2.x, 16, dt);
       leg.air.y = damp(leg.air.y, v2.y, 16, dt);
@@ -706,7 +771,11 @@ export class Animator {
         rate = 30;
       }
 
-      if (hasBall && throwing === null) {
+      if (hasBall && throwing === null && s.diveKind === 'carry') {
+        // Diving for the goal line: the ball stretched out ahead of him in both hands.
+        rel.set(-side * B.shoulderWidth + side * 0.08, 0.56, 0.3);
+        rate = 24;
+      } else if (hasBall && throwing === null) {
         if (i === this.carryArm) {
           // Both hands on it, then tucked against the ribs.
           v3.set(-side * B.shoulderWidth + side * 0.07, -0.16, 0.24);
@@ -747,6 +816,12 @@ export class Animator {
           rel.set(side * 0.42, -0.12, -0.14); // the off arm swings out for balance
         }
         rate = 26;
+      } else if (diveK > 0.3 && !hasBall && s.diveKind === 'tackle' && s.foe && s.foe.legs) {
+        // Laid out at his legs: both hands go for them.
+        rel.set(side * 0.05, 0.62, 0.2);
+        world = v3.copy(s.foe.legs).add(v1.set(side * 0.12, 0, 0).applyQuaternion(this.wChest));
+        reach = diveK;
+        rate = 26;
       } else if (diveK > 0.3 && !hasBall) {
         rel.set(side * 0.05, 0.62, 0.2);
       } else if (hands && handK > 0.01 && !hasBall && throwing === null) {
@@ -775,6 +850,13 @@ export class Animator {
             world = v3.copy(foe.chest).add(v1.set(side * 0.1, 0.03, 0).applyQuaternion(this.wChest));
             reach = handOn * punch;
             rate = 30;
+          } else if (hands.kind === 'wrap') {
+            // Arms round his waist: the near hand on his near hip, the far one round to the other.
+            const far = foe.sh[0] === nearShoulder ? foe.sh[1] : foe.sh[0];
+            world = v3.copy(foe.chest).lerp(near ? nearShoulder : far, near ? 0.55 : 0.8);
+            world.y -= near ? 0.5 : 0.44;
+            reach = handOn;
+            rate = 28;
           } else if (hands.kind === 'ride') {
             // Riding him: the near hand on his hip, the far one across his
             // back, pressing all the way.

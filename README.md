@@ -2,8 +2,9 @@
 
 A 3D football game about 1-on-1s. You line up against an AI rival, an AI
 quarterback throws the ball, and you play both sides: receiver when you have
-the ball, cornerback when he does. Win games, level up, and build a player who
-wins more.
+the ball, cornerback when he does. Catch it and run for the end zone; on
+defense, break it up or bring him down. Win games, level up, and build a
+player who wins more.
 
 It runs in the browser (Three.js). There are no art or audio files: the
 stadium, players and sounds are all generated in code, and the picture is
@@ -43,7 +44,8 @@ sideways and the menu opens (on Android it also goes full screen on your first
 tap). In a game:
 
 - **Left stick** (bottom left) moves you. A small push is a jog.
-- **Jump**: jump, or dive when the ball is out of reach.
+- **Jump**: jump, or dive when the ball is out of reach. After the catch it
+  reads **Dive**: for the goal line with the ball, or at his legs on defense.
 - **Sprint**: hold it to sprint.
 - **Cut** left and right: the juke / quick break step.
 - **Call**: snap the ball before the play (or "ready" on defense), call for
@@ -65,10 +67,12 @@ The result is in `dist/`.
 
 - **Both ways.** You and your rival trade roles every rep. With the ball you are
   the receiver; without it you are the corner.
-- **Scoring.** A completion is a point for the receiver. An incompletion is a
-  point for the defender. Possession flips after every point.
-- **Game length.** First to 3, 5 or 7. You pick before the game. A coin toss
-  decides who gets the ball first.
+- **Scoring.** A catch is 1 point for the receiver; taking it into the end
+  zone is a touchdown, worth 3. An incompletion is 1 point for the defender;
+  an interception is 3. Possession flips after every rep.
+- **Game length.** First to 5, 9 or 13. You pick before the game. A coin toss
+  decides who gets the ball first. A 3-point play can carry the winner past
+  the number.
 - **Offense is freestyle.** There are no plays to pick. Run wherever you want
   and press `Enter` to call for the ball. The QB leads you based on where you
   are heading, so call it as you come out of your break.
@@ -89,6 +93,35 @@ The result is in `dist/`.
   defender arrives while you are securing the ball, the hit can jar it loose;
   if you dove for it, you have to hold on when you hit the turf. On defense,
   when you cannot get to the ball, run through the receiver as it arrives.
+- **Feet in bounds.** A ball caught in the air is a catch only if you come
+  down with both feet in bounds (the lines are out), or your body if you dove.
+  Going up by a line with your momentum taking you out, your player plants
+  and goes up rather than out, then reaches his toes down and drags them in
+  behind him: agility and hands decide how far over the line he can still get
+  them down. A catch made that way is a toe-tap. The same goes for an
+  interception: a pick that comes down out of bounds is an incompletion.
+- **Contested balls.** With the other man right on you and the ball coming in
+  stride, `Space` plays it hard on its own: a layout (if you are quick and
+  agile, and the ball is low) or a high-point that attacks the ball and
+  reaches farther (if you can jump and are strong, and the ball is high).
+  Either side can do it. On defense, a ball you cannot reach at all turns
+  your dive on the receiver: lay out at him, and get there with the ball.
+- **After the catch.** Unless you caught it in the end zone, the play goes
+  on: you are a ball carrier until you get into the end zone or he stops
+  you. Run out of bounds, go down, or get tackled and it is a catch (1).
+  Get the ball across the goal line in bounds and it is a touchdown (3). With
+  the ball, `Space` dives for the goal line, stretching the ball out ahead of
+  you: if it breaks the plane before you land, it counts. A diving catch ends
+  where you land.
+- **Tackling.** On defense, get your arms on him and the tackle happens on
+  its own. From in front it is a wrap-up: he churns forward with you hanging
+  on, then you both go down, unless he tears free (stronger, more agile
+  runners break more of them). Arrive fast enough and it is a hit that puts
+  him straight down. From behind it is an arm tackle that misses more often,
+  and a runner mid-juke is the hardest man to get hold of. A miss costs you:
+  you lunged at air and he is gone. `Space` lays you out at his legs from a
+  few yards away: it takes his legs or trips him, but either way you are on
+  the turf.
 - **Hands at the line.** Inside arm's reach the hands come up on their own.
   A corner who is squared up in front of the receiver jams him. The hands
   land with a punch that takes a bite out of his speed and rocks his
@@ -121,13 +154,16 @@ The result is in `dist/`.
   stand on. Before the catch a man on his feet only ever stumbles. After it,
   a receiver who holds on through a hit can stay up and stumble on, or go
   down with the ball.
-- Interceptions, drops, swats, balls jarred loose, catches out of bounds and
-  balls that hit the turf are all incompletions. The rep ends when the catch
-  is finished.
+- Drops, swats, balls jarred loose, catches out of bounds and balls that hit
+  the turf are incompletions, 1 point for the defender. An interception ends
+  the rep (there is no return) and is worth 3.
 
-How a catch was made is called out when it is something special: diving,
-one-handed, over the shoulder, a toe-tap on the boundary, a juggling catch off
-a tip, or holding on through a hit.
+The result tells the whole play: how the catch was made when it was something
+special (diving, one-handed, over the shoulder, a toe-tap on the boundary, a
+juggling catch off a tip, holding on through a hit), where it was caught, how
+far he took it, how it ended (brought down, laid out, tripped up by a diving
+tackle, pushed out, dove across the goal line) and how many points it was
+worth.
 
 Your rival pays attention. Run the same kind of route a few times in a row and
 he starts sitting on it; the game tells you when he has caught on.
@@ -141,6 +177,7 @@ The same keys work in both roles, and up-screen is always downfield.
 | Move | `W` `A` `S` `D` or the arrow keys |
 | Sprint (drains your sprint tank) | hold `Shift` |
 | Play the ball: jump, or dive when it is out of reach | `Space` |
+| After the catch: dive for the goal line, or at his legs | `Space` |
 | Juke / quick break step, left and right | `Q` / `E` |
 | Call for the ball (offense) | `Enter` |
 | Snap, ready, next rep | `Space` or `Enter` |
@@ -164,18 +201,18 @@ always downfield:
 
 ## Levelling up
 
-Every game earns XP: some for each point you score, a bonus for winning, and
-more for longer games and tougher rivals. Each level gives 4 skill points to
+Every game earns XP: some for each point you score (a touchdown or a pick is
+3), a bonus for winning, and more for longer games and tougher rivals. Each level gives 4 skill points to
 spend on seven stats, all of which matter on both sides of the ball:
 
 | Stat | What it does |
 | --- | --- |
 | Speed | Top speed |
 | Acceleration | How quickly you reach it |
-| Agility | Sharper cuts and jukes; tighter coverage; better balance through contact and quicker to get it back |
-| Hands | Catches in traffic; holding on through a hit or the ground; breakups and interceptions |
-| Jumping | Reach on high balls |
-| Strength | Winning the hand fight, both ways: the jam, the release, and how long a corner can ride you; staying on your feet through a hit, and delivering one; contested catches |
+| Agility | Sharper cuts and jukes; tighter coverage; better balance through contact and quicker to get it back; making tacklers miss; toes down on the sideline; laying out for a contested ball |
+| Hands | Catches in traffic; holding on through a hit or the ground; toes down on the sideline; breakups and interceptions; wrapping up |
+| Jumping | Reach on high balls, and the high-point on a contested one |
+| Strength | Winning the hand fight, both ways: the jam, the release, and how long a corner can ride you; staying on your feet through a hit, and delivering one; contested catches; bringing a runner down, and breaking tackles |
 | Stamina | A bigger sprint tank that refills faster between reps |
 
 There are eight rivals, from a JV walk-on to an All-Pro. Beating one unlocks
@@ -190,16 +227,19 @@ src/
   game.js          game loop, match flow, keyboard controller
   core/            input, seeded RNG, vector helpers
   sim/             the football simulation (no rendering, runs in Node)
-    athlete.js       movement, stamina, jumping, diving, balance, going down
+    athlete.js       movement, stamina, jumping, diving, balance, going down,
+                     where his feet come down and dragging them in
     ball.js          the football: flight, tips, deflections
     qb.js            the AI quarterback and lead-pass solver
     receiverAI.js    the rival on offense
     defenderAI.js    the rival on defense
-    catching.js      reach, catch types, contest, hit and breakup odds
-    rep.js           one rep: presnap -> live -> flight -> done; the hand
-                     fight (jam, release, ride) and what a collision does
-                     to each man
-    match.js         first-to-N scoring and possession
+    catching.js      reach, catch types, contested plays, bounds, catch,
+                     hit, breakup and tackle odds
+    rep.js           one rep: presnap -> live -> flight -> run -> done; the
+                     hand fight (jam, release, ride), what a collision does
+                     to each man, coming down in bounds, and the run after
+                     the catch (tackles, dives, the goal line)
+    match.js         first-to-N scoring (1 and 3) and possession
   physics/         the rag doll (no rendering, runs in Node)
     body.js          body dimensions shared by the skeleton and the rag doll
     ragdoll.js       particles, joint limits and stiffness, turf contact
@@ -212,6 +252,7 @@ src/
                      uniform painted into one texture, inverse kinematics,
                      procedural animation, rag-doll-to-skeleton posing
   ui/              menus and HUD
+    playText.js      the line that tells the play on the result banner
   audio/           synthesized sound effects
 tests/             unit, rules and balance tests
 ```
@@ -222,8 +263,9 @@ tests/             unit, rules and balance tests
 npm test
 ```
 
-This runs the unit tests (rules, catching, contact, the rag doll, getting up,
-save data) plus a balance suite that simulates thousands of AI-vs-AI reps to
+This runs the unit tests (rules, catching, contact, the run after the catch
+and tackling, feet in bounds, the rag doll, getting up, save data) plus a
+balance suite that simulates thousands of AI-vs-AI reps to
 check that ratings decide who wins, so levelling up really helps.
 
 There is also a browser smoke test that plays full games through the keyboard
